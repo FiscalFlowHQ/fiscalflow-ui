@@ -1,75 +1,94 @@
 # Task 10 — Run workspace layout
 
 > **Context recap:** The run screen is the primary UX — databook, composer, rail, artifacts,
-and HITL in one coordinated layout. This task wires tasks 05–09 into `RunPage`.
+and HITL in one coordinated layout. Central **orchestrator** owns SSE lifecycle and
+reconnect behavior.
 
-**Docs to read:** `plans/UI_FLOW.md` (layout diagram).
+**Docs to read:** `plans/UI_FLOW.md`, `plans/BACKEND_CONTRACT.md` (SSE reconnect limit).
 
 ## Goal
 
-**Run workspace** at `/run/:threadId`: responsive three-column layout with centralized
-**run orchestration** (SSE lifecycle).
+**Run workspace** at `/run/:threadId`: three-column layout + orchestrator that correctly
+handles streaming, pause, terminal, and **server-side run without live SSE** after refresh.
 
 ## Dependencies: tasks 05–09.
 
 ## Scope
 
-**In:** `src/pages/RunPage.tsx` (full); `src/hooks/useRunOrchestrator.ts`; layout CSS in
-`src/styles/run-workspace.css`.
+**In:** `src/pages/RunPage.tsx`; `src/hooks/useRunOrchestrator.ts`; `src/styles/run-workspace.css`.
 
-**Out:** Reconnect/cancel polish (task 11); chat sidebar (task 12).
+**Out:** Cancel button polish (task 11); chat (task 12).
 
 ## Layout
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Top: session title · status chip · Cancel (stub → task 11)  │
+│ Top: title · run_status chip · Cancel (wired in task 11)      │
 ├──────────┬──────────────────────────────┬───────────────────┤
-│ Pipeline │ Artifact panel (task 09)     │ Databook (05)     │
+│ Pipeline │ Artifact panel (09)          │ Databook (05)     │
 │ rail (07)│                              │ Composer (06)     │
 │          │                              │ HITL stack (08)   │
 └──────────┴──────────────────────────────┴───────────────────┘
 ```
 
-Mobile: stack vertically — rail horizontal stepper on top.
-
-## Orchestrator responsibilities
+## Orchestrator
 
 ```typescript
+type OrchestratorPhase =
+  | "no_document"    // upload not ready
+  | "ready"          // can start
+  | "streaming"      // SSE connected
+  | "paused"         // interrupt shown; SSE closed
+  | "server_running" // BE run in progress but no local SSE (after refresh)
+  | "completed"
+  | "failed"
+  | "cancelled";
+
 // useRunOrchestrator(threadId)
-state: "idle" | "uploading" | "ready" | "running" | "interrupted" | "done" | "error"
-startRun(request): void      // wires SSE handlers to rail, tokens, interrupt
-resumeRun(resume): void     // after HITL
-// handlers fan-out to: pipeline, liveDraft, interruptStack
+startRun(request): void
+resumeRun(body: ResumeRequest): void
+// fan-out: pipeline, liveDraft, interruptStack, artifactState
 ```
 
-State machine:
+### State transitions
 
-- `idle` → document not ready
-- `ready` → can start
-- `running` → SSE active, no interrupt
-- `interrupted` → show HITL, SSE closed
-- `done` / `error` → terminal
+- `ready` + Start → `streaming`
+- `streaming` + `interrupt` event → `paused`
+- `paused` + resume → `streaming`
+- `streaming` + `done` → `completed`
+- `streaming` + `error` → `failed`
+- Mount + `run_status` active + no SSE → **`server_running`** (see below)
+- Mount + `state.interrupt` → `paused` (show HITL without SSE)
+
+### SSE reconnect limitation (critical)
+
+The API **cannot** re-attach to an in-flight stream. On refresh while BE is still running:
+
+1. Set phase → `server_running`.
+2. Show banner: "Run in progress on server — live preview unavailable until the next pause
+   or completion."
+3. Poll `getSessionStatus` + `getSessionState` every 4s (task 11 hook).
+4. When `interrupt` appears → `paused` + render HITL from `state.interrupt`.
+5. When `run_status === "completed"` → `completed` + hydrate artifacts.
+
+Do **not** spin a fake token stream or leave `streaming` indefinitely.
 
 ## Implementation notes
 
-- Load `documentRef` from local session on mount.
-- Single SSE connection at a time — guard double-start.
-- Pass `threadId` from `useParams` to all children.
-- Breadcrumb: Home → Run title.
+- Single SSE connection; guard double-start/resume.
+- Load `documentRef` from local session on mount; trigger reconnect check immediately.
+- HITL stack in right column — expand artifact panel width on pause if needed (CSS).
+- Breadcrumb: Home → session title.
 
 ## Verification
 
-- End-to-end manual: create session → upload → start → see rail + tokens + interrupt (with API key).
-- Layout: 1280px and 768px widths usable.
-
-## Integration check
-
-Full path matches `UI_FLOW.md` happy path.
+- Happy path: upload → start → rail + tokens + interrupt (with LLM key).
+- Refresh during `server_running` → banner, no hung spinner; pause still recoverable.
+- Layout at 1280px and 768px.
 
 ## Definition of done
 
-Integrated run workspace; Handoff with screenshots or flow notes.
+Integrated workspace + orchestrator phases; Handoff documents poll interval choice.
 
 ---
 

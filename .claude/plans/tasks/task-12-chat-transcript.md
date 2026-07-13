@@ -27,7 +27,7 @@ type TranscriptEntry =
   | { kind: "step"; node: string; at: string }
   | { kind: "assistant"; text: string; at: string }      // aggregated tokens per step
   | { kind: "interrupt"; tier: string; at: string }
-  | { kind: "user"; action: string; at: string }         // approve/edit/reject
+  | { kind: "user"; action: string; at: string }         // approve/edit/reject/answer
   | { kind: "error"; message: string; at: string };
 ```
 

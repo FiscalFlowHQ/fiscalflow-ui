@@ -3,48 +3,33 @@
 > **Context recap:** Generation is driven by Server-Sent Events on `start` and `resume`.
 > Mirror `fiscalflow-api/app/api/streaming.py` and `scripts/sse_client.py`.
 
-**Docs to read:** BE task-08 handoff (event vocabulary, `subgraphs=True` namespaces).
+**Docs to read:** BE task-08 handoff, `plans/BACKEND_CONTRACT.md`.
 
 ## Goal
 
-A reusable **SSE consumer** that parses the stable event vocabulary and invokes callbacks —
-usable from `RunPage` for both start and resume.
+Reusable **SSE consumer** for the stable event vocabulary — POST + stream reader.
 
-## Dependencies: task 02 (auth headers, types).
+## Dependencies: task 02.
 
 ## Scope
 
-**In:** `src/api/sse.ts`; `src/types/sse.ts`; optional `src/api/sse.test.ts` with fixture
-event lines.
+**In:** `src/api/sse.ts`; `src/types/sse.ts`; `src/api/sse.test.ts` with fixture lines.
 
-**Out:** UI components (task 07+); run orchestration (task 10).
+**Out:** UI components (task 07+).
 
-## Event vocabulary (must handle)
+## Event vocabulary
 
-| `event` | `data` shape | Notes |
+| `event` | `data` | Notes |
 |---|---|---|
-| `step` | `{ node: string, namespace: string[] }` | Pipeline rail |
-| `token` | raw string (JSON string or plain text) | Prose streaming |
-| `interrupt` | `InterruptEnvelope` JSON | Pause run |
+| `step` | JSON `{ node, namespace }` | `namespace` is `string[]` |
+| `token` | **Plain text** (not JSON) | Prose only |
+| `interrupt` | JSON `InterruptEnvelope` | Stream ends after this |
 | `done` | `{}` | Terminal success |
-| `error` | `{ message: string }` | Terminal failure |
+| `error` | JSON `{ message }` | Terminal failure |
 
-## Interfaces exposed
+## Interfaces
 
 ```typescript
-type SseEvent =
-  | { type: "step"; node: string; namespace: string[] }
-  | { type: "token"; text: string }
-  | { type: "interrupt"; envelope: InterruptEnvelope }
-  | { type: "done" }
-  | { type: "error"; message: string };
-
-type SseHandlers = {
-  onEvent: (ev: SseEvent) => void;
-  onClose?: () => void;
-};
-
-// POST body as JSON; response body is text/event-stream
 streamGeneration(
   threadId: string,
   path: "start" | "resume",
@@ -56,26 +41,22 @@ streamGeneration(
 
 ## Implementation notes
 
-- Use `fetch` + `ReadableStream` reader (not `EventSource` — POST required). Parse
-  `event:` / `data:` lines per SSE spec; buffer partial lines.
-- Pass `Authorization` header from task 01 helper.
-- On `interrupt`, **stop reading** — caller shows HITL UI; next call is `resume`.
-- On HTTP **409**, throw `ApiError` before stream read.
-- Support `AbortSignal` for cancel (task 11) — abort fetch when user cancels.
-- Reference implementation: `fiscalflow-api/scripts/sse_client.py`.
+- `fetch` + `ReadableStream`; parse `event:` / `data:` lines; buffer partial lines.
+- `Authorization` header from task 01.
+- On `interrupt`: stop reading; caller shows HITL; next call is `resume`.
+- HTTP **409** on both `start` and `resume` → throw `ApiError` before read.
+- HTTP **401** → throw with auth hint.
+- `AbortSignal` for cancel (task 11).
+- `token` data: use raw string after `data:` trim — do not `JSON.parse` unless starts with `{`.
 
 ## Verification
 
-- Unit test: feed recorded SSE lines (from `sse_client.py` run) → correct `SseEvent[]`.
-- Manual: log events to console from a dev button against live API + mocked LLM run.
-
-## Integration check
-
-Works with BE `POST /sessions/{id}/start` on a ready document (see BE task-09 manual).
+- Unit test: fixture lines from `sse_client.py` run → `SseEvent[]`.
+- Test: plain-text token line without JSON quotes.
 
 ## Definition of done
 
-SSE parser + `streamGeneration`/`streamResume` helpers; tests; Handoff notes.
+SSE parser + tests; Handoff notes.
 
 ---
 

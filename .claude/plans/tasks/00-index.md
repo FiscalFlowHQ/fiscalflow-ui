@@ -21,8 +21,9 @@ run workspace under `/run/:threadId`.
 |---|---|
 | `.claude/PROJECT_CONTEXT.md` | UI product context |
 | `.claude/plans/UI_FLOW.md` | Screen map, SSE mapping, layout |
+| `.claude/plans/BACKEND_CONTRACT.md` | **UI TypeScript contract** — state fields, nodes, errors |
 | `fiscalflow-api/.claude/plans/backend-architecture.md` | API contract §8 (backend authority) |
-| `fiscalflow-api/app/api/schemas.py` | Request/response TypeScript sources |
+| `fiscalflow-api/app/api/schemas.py` | Request/response Pydantic sources |
 
 ## Session protocol
 
@@ -43,12 +44,12 @@ run workspace under `/run/:threadId`.
 | 03 | [SSE streaming client](task-03-sse-client.md) | 02 | 08 | todo | | |
 | 04 | [Session home & persistence](task-04-sessions.md) | 02 | 03 | todo | | |
 | 05 | [Databook upload & ingestion](task-05-databook.md) | 02, 04 | 09 | todo | | |
-| 06 | [Run composer](task-06-run-composer.md) | 04, 05 | 08 | todo | | |
-| 07 | [Pipeline progress rail](task-07-pipeline-rail.md) | 03 | 08 | todo | | |
-| 08 | [HITL review system](task-08-hitl-review.md) | 03, 07 | 04, 08 | todo | | |
-| 09 | [Artifact viewers](task-09-artifact-viewers.md) | 08 | — | todo | | |
-| 10 | [Run workspace layout](task-10-run-workspace.md) | 05–09 | — | todo | | |
-| 11 | [Reconnect, cancel & errors](task-11-lifecycle.md) | 03, 10 | 08 | todo | | |
+| 06 | [Run composer](task-06-run-composer.md) | 02, 04, 05 | 08, 15 | todo | | Provider `key_present` gate |
+| 07 | [Pipeline progress rail](task-07-pipeline-rail.md) | 03 | 08 | todo | | Real outer nodes from `outer.py` |
+| 08 | [HITL review system](task-08-hitl-review.md) | 03, 07 | 04, 08 | todo | | Structured interrupt matrix |
+| 09 | [Artifact viewers](task-09-artifact-viewers.md) | 08 | 14 | todo | | `completed_sections` not `final_report` |
+| 10 | [Run workspace layout](task-10-run-workspace.md) | 05–09 | — | todo | | `server_running` phase |
+| 11 | [Reconnect, cancel & errors](task-11-lifecycle.md) | 03, 10 | 08 | todo | | Poll + no SSE reattach |
 | 12 | [Chat transcript](task-12-chat-transcript.md) | 10 | — | todo | | |
 | 13 | [Settings screen](task-13-settings.md) | 02 | 15 | todo | | Providers API live on BE |
 | 14 | [Tauri desktop shell](task-14-tauri.md) | 10 | — | todo | | |
@@ -92,5 +93,6 @@ All 15 backend tasks are **done**. UI can rely on the full contract:
 | `GET/PUT /settings/providers` | 13 |
 | Section catalog (`quality_of_earnings`, `business_overview`) | 06 |
 
-Read BE handoffs for deviations: upload keeps **original filename**; `approval_policy` presets
-are `thorough` \| `balanced` (not free-form strings); clarification pauses use `action: "answer"`.
+Read `BACKEND_CONTRACT.md` before tasks 02, 06–11. BE deviations: upload keeps **original
+filename**; `approval_policy` is `thorough` \| `balanced`; pause = `state.interrupt`, not a
+`run_status`; clarification uses `action: "answer"`; **no mid-run SSE reattach** after refresh.

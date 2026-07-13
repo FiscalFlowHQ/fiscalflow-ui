@@ -1,61 +1,57 @@
 # Task 13 — Settings screen
 
-> **Context recap:** Local configuration: API base URL, bearer token, and LLM provider
-registry via **live** BE endpoints. Settings must work in browser dev and Tauri production.
+> **Context recap:** API URL, bearer token, and LLM provider registry. Provider keys live
+> on the **API server env** — UI only sees `key_present`.
 
-**Docs to read:** BE task-15 handoff, `app/api/routers/settings.py`, `plans/UI_FLOW.md`.
+**Docs to read:** BE task-15, `app/api/routers/settings.py`, `plans/BACKEND_CONTRACT.md`.
 
 ## Goal
 
-**Settings page** at `/settings` for connection config and provider management.
+**Settings page** at `/settings` for connection + provider defaults. Changes unblock
+**Start** in task-06 preflight.
 
 ## Dependencies: task 02.
 
 ## Scope
 
-**In:** `src/pages/SettingsPage.tsx`; `src/stores/settingsStore.ts` (localStorage);
-`src/api/fiscalflow.ts` extensions for providers when available.
+**In:** `src/pages/SettingsPage.tsx`; `src/stores/settingsStore.ts`; provider form.
 
-**Out:** BE-side provider validation logic.
+### 1. API connection
 
-## Sections
+- `VITE_API_BASE_URL` override (empty = proxy).
+- Bearer token → localStorage `fiscalflow.settings.v1`.
+- Test connection → `checkHealth()`.
+- CORS / connection hints on failure.
 
-### 1. API connection (implement now)
+### 2. LLM providers
 
-- `VITE_API_BASE_URL` override field (default empty = proxy).
-- API bearer token (password input) — stored in localStorage `fiscalflow.settings.v1`.
-- **Test connection** button → `checkHealth()`.
-- CORS hint if health fails from browser.
-
-### 2. LLM providers (BE-15 — implement now)
-
-- `GET /settings/providers` → `{ provider, model, available_providers: [{ provider, default_model, key_present }] }`.
-- `PUT /settings/providers` → `{ provider, model? }` — keys stay in server env (`key_present` only).
-- Default provider/model saved on BE MetaStore; run composer can still pass `provider_override` per run.
+- `GET /settings/providers` on load.
+- Provider dropdown from `available_providers`.
+- Model text field (optional; default from `default_model`).
+- `PUT /settings/providers` on save.
+- Per-row badge: **Key configured** / **Key missing** (`key_present`).
+- Help text: "API keys are set as environment variables on the fiscalflow-api server
+  (e.g. `ZHIPU_API_KEY`). This app cannot set keys remotely."
 
 ### 3. Advanced (optional)
 
-- Poll interval for document status.
-- Theme toggle (defer if global.css only dark).
+- Document poll interval override.
+- Link to fiscalflow-api README for env vars.
 
 ## Implementation notes
 
-- Settings apply immediately to `getAuthHeaders()` without restart.
-- Mask secrets in UI; clear key button.
-- If providers endpoint fails, show connection error (should not 404 — BE-15 is done).
+- Settings apply immediately to `getAuthHeaders()`.
+- After save, composer preflight (task 06) should pass if `key_present` for selected provider.
+- Mask token field; clear button.
 
 ## Verification
 
-- Save token → subsequent API calls include `Authorization`.
-- Health test shows success/failure inline.
-
-## Integration check
-
-BE health endpoint returns 200 without auth (confirm in BE task-01).
+- Save provider → subsequent `getProviderSettings` reflects change.
+- `key_present: false` → visible warning on Settings and composer (task 06).
 
 ## Definition of done
 
-Settings page with connection section; provider section stubbed or live per BE-15; Handoff.
+Settings page live; Handoff lists env vars needed for Z.ai pilot.
 
 ---
 

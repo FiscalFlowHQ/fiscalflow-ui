@@ -37,7 +37,8 @@ all generation logic lives in `fiscalflow-api`.
 
 ## Backend contract (fixed — do not invent endpoints)
 
-Read `fiscalflow-api/app/api/schemas.py` and `backend-architecture.md` §8. Key endpoints:
+Read `.claude/plans/BACKEND_CONTRACT.md` first, then `fiscalflow-api/app/api/schemas.py` and
+`backend-architecture.md` §8. Key endpoints:
 
 | Endpoint | Purpose |
 |---|---|

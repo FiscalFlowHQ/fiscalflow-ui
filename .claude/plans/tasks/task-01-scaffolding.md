@@ -4,7 +4,8 @@
 > `fiscalflow-api` over HTTP/SSE. Read `tasks/00-index.md` and
 > `.claude/PROJECT_CONTEXT.md` first.
 
-**Docs to read:** `plans/UI_FLOW.md` (routes), `fiscalflow-api` task-01 handoff (CORS origins).
+**Docs to read:** `plans/UI_FLOW.md` (routes), `plans/BACKEND_CONTRACT.md` (proxy paths),
+`fiscalflow-api` task-01 handoff (CORS origins).
 
 ## Goal
 
@@ -77,7 +78,7 @@ Vite dev proxy: forward `/sessions`, `/documents`, `/health`, `/settings` to `:8
 - `npm run dev` — all routes render without console errors.
 - `npm run build` passes.
 - `GET /health` via proxy shows green status on HomePage when API is up.
-- Legacy `/` audit upload still reachable (move to `/audit` only if you document in Handoff).
+- Legacy audit upload stays at `/` until task 15 moves it to `/audit` — document in Handoff if you early-migrate.
 
 ## Integration check
 
