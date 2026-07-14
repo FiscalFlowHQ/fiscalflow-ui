@@ -118,8 +118,39 @@ HITL components + resume hook + bulk-approve; Handoff updated.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/components/hitl/hitlContent.ts` — payload/plan/questions helpers; `envelopeKey` /
+  `resumeInterruptId` for BE envelopes missing `interrupt_id`.
+- `src/components/hitl/InterruptCard.tsx` — plan / review / clarification UI; Approve /
+  Edit / Reject(+reason dual-write) / Answer; attempt badge from attempt ≥ 2.
+- `src/components/hitl/InterruptStack.tsx` — stack chrome + bulk-approve toggle.
+- `src/hooks/useHitlResume.ts` — interrupt stack (dedupe by key), local history (task 12),
+  `streamResume`, in-flight guard, **409 → GET /state** (no blind retry), bulk auto-approve
+  for `phase: "plan"` only.
+- `useStartRun` — `beginExternalStream` + `observeStreamEvent` so resume shares the phase
+  machine with start.
+- `RunPage` wires SSE `interrupt` → stack; shows `InterruptStack` while paused/queued.
+- CSS: `.hitl-*` in `global.css`.
+- Tests: `useHitlResume.test.tsx` — resume body + `interrupt_id`, double Approve → one
+  request, 409→state, bulk-approve (76 total green); build green.
+
+### Contract notes
+- Resume always sends `interrupt_id` (synthesized via `envelopeKey` when live BE omits it).
+- Reject sends both `reason` and `edited_content: { reason }` for live-BE feedback drift.
+- Stream ends on interrupt; resume opens a **new** SSE stream — same `onSseEvent` handlers
+  as start (pipeline + session badges).
+- Bulk-approve is run-scoped (all plan gates while toggle is on), not section-scoped;
+  review/clarification always render. Tighten to “current section” in task 10 if needed.
+
+### For task 09 / 10 / 11 / 12
+- Artifact deep viewers stay out of the card (task 09); card shows markdown/JSON editor stubs.
+- Task 10 may relocate the stack in the workspace grid; keep `InterruptStack` API stable.
+- Task 11: hydrate stack from `GET /state.interrupt` on reconnect/`continue` — hook already
+  supports `pushInterrupt` + 409 refetch path.
+- Task 12: consume `hitl.history` for the transcript (auto entries included).

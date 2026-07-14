@@ -28,6 +28,10 @@ export type UseStartRunResult = {
   start: (body: StartGenerationRequest) => Promise<void>;
   abort: () => void;
   reset: () => void;
+  /** Mark streaming when a resume/continue opens a new SSE body. */
+  beginExternalStream: () => void;
+  /** Apply SSE events from resume/continue into the same phase machine. */
+  observeStreamEvent: (ev: SseEvent) => void;
 };
 
 export function useStartRun(options: UseStartRunOptions): UseStartRunResult {
@@ -51,6 +55,23 @@ export function useStartRun(options: UseStartRunOptions): UseStartRunResult {
     setError(null);
   }, [abort]);
 
+  /** Phase-only — callers still invoke their own `onEvent` / pipeline handlers. */
+  const observeStreamEvent = useCallback((ev: SseEvent) => {
+    if (ev.type === "interrupt") setPhase("paused");
+    else if (ev.type === "done") setPhase("done");
+    else if (ev.type === "error") {
+      setError(ev.message);
+      setPhase("error");
+    } else if (ev.type === "step" || ev.type === "token") {
+      setPhase((prev) => (prev === "paused" || prev === "idle" ? "streaming" : prev));
+    }
+  }, []);
+
+  const beginExternalStream = useCallback(() => {
+    setError(null);
+    setPhase("streaming");
+  }, []);
+
   const start = useCallback(
     async (body: StartGenerationRequest) => {
       if (!body.selected_sections?.length) {
@@ -73,12 +94,7 @@ export function useStartRun(options: UseStartRunOptions): UseStartRunResult {
           {
             onEvent: (ev) => {
               onEventRef.current?.(ev);
-              if (ev.type === "interrupt") setPhase("paused");
-              else if (ev.type === "done") setPhase("done");
-              else if (ev.type === "error") {
-                setError(ev.message);
-                setPhase("error");
-              }
+              observeStreamEvent(ev);
             },
             onClose: () => {
               onCloseRef.current?.();
@@ -115,7 +131,7 @@ export function useStartRun(options: UseStartRunOptions): UseStartRunResult {
         if (abortRef.current === controller) abortRef.current = null;
       }
     },
-    [abort, threadId]
+    [abort, observeStreamEvent, threadId]
   );
 
   return {
@@ -126,5 +142,7 @@ export function useStartRun(options: UseStartRunOptions): UseStartRunResult {
     start,
     abort,
     reset,
+    beginExternalStream,
+    observeStreamEvent,
   };
 }

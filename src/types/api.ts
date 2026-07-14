@@ -103,6 +103,70 @@ export interface SectionCatalogResponse {
  * Outer graph channels as returned in `GET /sessions/{id}/state` → `values`.
  * Extra BE keys are allowed; only UI-relevant fields are declared.
  */
+export interface Finding {
+  id: string;
+  section_id: string;
+  claim: string;
+  evidence_refs: string[];
+}
+
+export interface ClaimItem {
+  claim_text?: string;
+  claim?: string;
+  evidence_refs?: string[];
+  [key: string]: unknown;
+}
+
+export interface QualityVerdict {
+  verdict?: string;
+  failure_type?: string | null;
+  failures?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface CompletedSection {
+  id: string;
+  title?: string;
+  order?: number | null;
+  draft?: string;
+  claims?: ClaimItem[];
+  quality_verdict?: QualityVerdict | null;
+}
+
+export interface CrossSectionReview {
+  contradictions?: unknown[];
+  duplicate_findings?: unknown[];
+  cross_references?: unknown[];
+  [key: string]: unknown;
+}
+
+export interface ReportMetadata {
+  provider_override?: string | null;
+  /** Server filesystem paths — never render as content; export via GET /document. */
+  artifacts?: { markdown?: string; pptx?: string; pdf?: string };
+  cross_section_review?: CrossSectionReview | null;
+  [key: string]: unknown;
+}
+
+/**
+ * In-progress section subgraph snapshot when remediated BE surfaces it on `/state`.
+ * Live BE (sessions.py) currently omits this — treat as null and rebuild Live from draft.
+ */
+export interface SectionState {
+  section_id?: string | null;
+  section?: { id?: string; title?: string; order?: number | null } | null;
+  draft?: string;
+  structured_outline?: Record<string, unknown> | null;
+  evidence_bundle?: Record<string, unknown> | null;
+  step_trace?: string[];
+  clarifications?: unknown[];
+  claims?: ClaimItem[];
+  quality_verdict?: QualityVerdict | null;
+  regen_count?: number;
+  review_notes?: unknown[];
+  [key: string]: unknown;
+}
+
 export interface ReportValues {
   user_request?: string | null;
   databook_ref?: string;
@@ -111,21 +175,16 @@ export interface ReportValues {
   active_section_plan?: { content: string; section_id?: string } | null;
   sections?: unknown[];
   current_section_index?: number;
-  completed_sections?: unknown[];
-  prior_findings?: unknown[];
+  completed_sections?: CompletedSection[];
+  prior_findings?: Finding[];
   audit_status?: AuditStatus;
   run_status?: RunStatus | string | null;
   error?: RunError | string | null;
-  metadata?: {
-    provider_override?: string | null;
-    artifacts?: { markdown?: string; pptx?: string; pdf?: string };
-  };
+  metadata?: ReportMetadata;
+  /** Server filesystem path — never render as markdown body. */
   final_document?: string;
   [key: string]: unknown;
 }
-
-/** Mid-section subgraph snapshot when the BE surfaces it on `/state`. */
-export type SectionState = Record<string, unknown>;
 
 export interface SessionStateResponse {
   values: ReportValues;

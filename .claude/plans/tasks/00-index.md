@@ -44,9 +44,9 @@ run workspace under `/run/:threadId`.
 | 04 | [Session home & persistence](task-04-sessions.md) | 02 | 03 | done | 2026-07-14 | localStorage sessions; badges; New FDD run → /run/:id |
 | 05 | [Databook upload & ingestion](task-05-databook.md) | 02, 04 | 09 | done | 2026-07-14 | DatabookPanel + poll hook; Start gated on ready |
 | 06 | [Run composer](task-06-run-composer.md) | 04, 05 | 08 | done | 2026-07-14 | Composer + GET /sections + streamStart; Start gated on ready |
-| 07 | [Pipeline progress rail](task-07-pipeline-rail.md) | 03 | 08 | todo | | |
-| 08 | [HITL review system](task-08-hitl-review.md) | 03, 07 | 04, 08 | todo | | |
-| 09 | [Artifact viewers](task-09-artifact-viewers.md) | 08 | — | todo | | |
+| 07 | [Pipeline progress rail](task-07-pipeline-rail.md) | 03 | 08 | done | 2026-07-14 | Loop-aware reducer + rail; vocab fixture (live capture pending) |
+| 08 | [HITL review system](task-08-hitl-review.md) | 03, 07 | 04, 08 | done | 2026-07-14 | InterruptCard/Stack + useHitlResume; 409→state; bulk plan approve |
+| 09 | [Artifact viewers](task-09-artifact-viewers.md) | 08 | — | done | 2026-07-14 | 5-tab ArtifactPanel + useArtifactState; section_state drift noted |
 | 10 | [Run workspace layout](task-10-run-workspace.md) | 05–09 | — | todo | | |
 | 11 | [Reconnect, cancel & errors](task-11-lifecycle.md) | 03, 10 | 08 | todo | | |
 | 12 | [Chat transcript](task-12-chat-transcript.md) | 10 | — | todo | | |

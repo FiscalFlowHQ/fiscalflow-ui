@@ -1,7 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import ArtifactPanel from "../components/artifacts/ArtifactPanel";
 import DatabookPanel from "../components/databook/DatabookPanel";
+import InterruptStack from "../components/hitl/InterruptStack";
+import PipelineRail from "../components/pipeline/PipelineRail";
 import RunComposer from "../components/run/RunComposer";
+import { useArtifactState } from "../hooks/useArtifactState";
+import { useHitlResume } from "../hooks/useHitlResume";
+import { usePipelineProgress } from "../hooks/usePipelineProgress";
 import { useStartRun } from "../hooks/useStartRun";
 import {
   createLocalSession,
@@ -10,9 +16,10 @@ import {
   touchOpened,
   upsertSession,
 } from "../stores/sessionStore";
+import type { InterruptEnvelope, ResumeRequest } from "../types/api";
 import type { SseEvent } from "../types/sse";
 
-/** Run workspace shell — databook + composer; rail/HITL in later tasks. */
+/** Run workspace shell — rail + artifacts + databook/composer/HITL. */
 export default function RunPage() {
   const { threadId = "" } = useParams<{ threadId: string }>();
 
@@ -23,7 +30,56 @@ export default function RunPage() {
 
   const [documentRef, setDocumentRef] = useState<string | null>(sessionDocumentRef);
   const [databookReady, setDatabookReady] = useState(false);
-  const [sseLog, setSseLog] = useState<SseEvent[]>([]);
+
+  const pipeline = usePipelineProgress({ threadId, pollStatus: true });
+  const { reset: resetPipeline, applyEvent: applyPipelineEvent, state: pipelineState } =
+    pipeline;
+
+  const artifacts = useArtifactState({ threadId });
+
+  const pushInterruptRef = useRef<(envelope: InterruptEnvelope) => void>(() => {});
+  const beginExternalStreamRef = useRef<() => void>(() => {});
+  const observeStreamEventRef = useRef<(ev: SseEvent) => void>(() => {});
+  const applyArtifactEventRef = useRef<(ev: SseEvent) => void>(() => {});
+  const seedArtifactInterruptRef = useRef<(envelope: InterruptEnvelope) => void>(() => {});
+
+  const onSseEvent = useCallback(
+    (ev: SseEvent) => {
+      console.debug("[fiscalflow sse]", ev);
+      applyArtifactEventRef.current(ev);
+      applyPipelineEvent(ev);
+      if (ev.type === "interrupt") {
+        pushInterruptRef.current(ev.envelope);
+        seedArtifactInterruptRef.current(ev.envelope);
+        patchSession(threadId, { paused: true, lastRunStatus: "awaiting_approval" });
+      } else if (ev.type === "done") {
+        patchSession(threadId, { paused: false, lastRunStatus: "completed" });
+      } else if (ev.type === "error") {
+        patchSession(threadId, { paused: false, lastRunStatus: "failed" });
+      } else if (ev.type === "step") {
+        patchSession(threadId, { paused: false, lastRunStatus: "generating" });
+      }
+    },
+    [applyPipelineEvent, threadId]
+  );
+
+  const startRun = useStartRun({
+    threadId,
+    onEvent: onSseEvent,
+  });
+
+  const hitl = useHitlResume({
+    threadId,
+    onBeginStream: () => beginExternalStreamRef.current(),
+    onStreamEvent: (ev) => observeStreamEventRef.current(ev),
+    onEvent: onSseEvent,
+  });
+
+  pushInterruptRef.current = hitl.pushInterrupt;
+  beginExternalStreamRef.current = startRun.beginExternalStream;
+  observeStreamEventRef.current = startRun.observeStreamEvent;
+  applyArtifactEventRef.current = artifacts.applyEvent;
+  seedArtifactInterruptRef.current = artifacts.seedFromInterrupt;
 
   useEffect(() => {
     if (!threadId) return;
@@ -35,8 +91,14 @@ export default function RunPage() {
     }
     setDocumentRef(sessionDocumentRef);
     setDatabookReady(false);
-    setSseLog([]);
-  }, [threadId, sessionDocumentRef]);
+    resetPipeline([]);
+    hitl.clearStack();
+    startRun.reset();
+    artifacts.reset();
+    void artifacts.refreshState();
+    // Reset workspace state when the route thread changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [threadId, sessionDocumentRef, resetPipeline]);
 
   const onDocumentRef = useCallback(
     (ref: string) => {
@@ -51,28 +113,17 @@ export default function RunPage() {
     if (ref) setDocumentRef(ref);
   }, []);
 
-  const onSseEvent = useCallback(
-    (ev: SseEvent) => {
-      // Task 07+ consumes these; keep a small buffer + console for manual QA.
-      console.debug("[fiscalflow sse]", ev);
-      setSseLog((prev) => [...prev, ev].slice(-40));
-      if (ev.type === "interrupt") {
-        patchSession(threadId, { paused: true, lastRunStatus: "awaiting_approval" });
-      } else if (ev.type === "done") {
-        patchSession(threadId, { paused: false, lastRunStatus: "completed" });
-      } else if (ev.type === "error") {
-        patchSession(threadId, { paused: false, lastRunStatus: "failed" });
-      } else if (ev.type === "step") {
-        patchSession(threadId, { paused: false, lastRunStatus: "generating" });
-      }
+  const onResume = useCallback(
+    (request: ResumeRequest, envelope: InterruptEnvelope) => {
+      void hitl.resume(request, { envelope });
     },
-    [threadId]
+    [hitl]
   );
 
-  const startRun = useStartRun({
-    threadId,
-    onEvent: onSseEvent,
-  });
+  const showHitl =
+    hitl.stack.length > 0 ||
+    startRun.phase === "paused" ||
+    Boolean(hitl.resumeError);
 
   if (!threadId) {
     return (
@@ -102,7 +153,10 @@ export default function RunPage() {
         )}
       </header>
 
-      <div className="run-page__body">
+      <div className="run-page__layout run-page__layout--workspace">
+        <PipelineRail state={pipelineState} />
+        <ArtifactPanel artifacts={artifacts} />
+
         <div className="run-page__col">
           <DatabookPanel
             key={threadId}
@@ -117,35 +171,30 @@ export default function RunPage() {
             locked={startRun.locked}
             starting={startRun.starting}
             startError={startRun.error}
-            onStart={(body) => void startRun.start(body)}
+            onStart={(body) => {
+              hitl.clearStack();
+              artifacts.reset();
+              resetPipeline(body.selected_sections);
+              void startRun.start(body);
+            }}
             onClearStartError={() => {
               if (startRun.phase === "error") startRun.reset();
             }}
           />
+
+          {showHitl && (
+            <InterruptStack
+              current={hitl.current}
+              queueLength={hitl.stack.length}
+              resuming={hitl.resuming}
+              resumeError={hitl.resumeError}
+              bulkApprovePlans={hitl.bulkApprovePlans}
+              onBulkApproveChange={hitl.setBulkApprovePlans}
+              onResume={onResume}
+              onDismissError={hitl.clearResumeError}
+            />
+          )}
         </div>
-        <aside className="run-page__aside" aria-label="Stream preview">
-          <h2>Stream preview</h2>
-          <p>
-            Pipeline rail and HITL review land in tasks 07–08. SSE events from Start are
-            logged here for verification.
-          </p>
-          {documentRef && (
-            <p className="run-page__aside-ref">
-              Active ref <code>{documentRef}</code>
-            </p>
-          )}
-          {sseLog.length === 0 ? (
-            <p className="run-composer__hint">No events yet.</p>
-          ) : (
-            <ul className="sse-preview">
-              {sseLog.map((ev, i) => (
-                <li key={`${ev.type}-${i}`}>
-                  <code>{formatSsePreview(ev)}</code>
-                </li>
-              ))}
-            </ul>
-          )}
-        </aside>
       </div>
     </div>
   );
@@ -180,20 +229,5 @@ function startRunPhaseLabel(phase: ReturnType<typeof useStartRun>["phase"]): str
       return "Failed";
     default:
       return phase;
-  }
-}
-
-function formatSsePreview(ev: SseEvent): string {
-  switch (ev.type) {
-    case "step":
-      return `step ${ev.node}${ev.namespace.length ? ` [${ev.namespace.join("/")}]` : ""}`;
-    case "token":
-      return `token ${JSON.stringify(ev.text.slice(0, 48))}`;
-    case "interrupt":
-      return `interrupt ${ev.envelope.tier}/${ev.envelope.phase}`;
-    case "done":
-      return "done";
-    case "error":
-      return `error ${ev.message}`;
   }
 }
