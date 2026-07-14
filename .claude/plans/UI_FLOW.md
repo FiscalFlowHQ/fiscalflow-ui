@@ -33,16 +33,21 @@ New session → Upload databook → Poll until ready → Select sections → Sta
 
 ```typescript
 {
+  interrupt_id: string,               // resume token — required back on POST /resume
   tier: "global" | "section" | "step",
   phase: "plan" | "review" | "clarification",
   section_id: string | null,
   step_id: string | null,
-  content: object,
+  content: object,                    // review: { [output_key]: value, attempt: n }
   allowed_actions: ("approve" | "edit" | "reject" | "answer")[]
 }
 ```
 
-Resume: `POST /sessions/{id}/resume` with `{ action, edited_content? }` → new SSE stream.
+Resume: `POST /sessions/{id}/resume` with
+`{ action, interrupt_id, edited_content?, reason? }` → new SSE stream. A stale/duplicate
+`interrupt_id` gets 409 (refetch `GET /state`). `reject` regenerates the step using
+`reason` as feedback. Mid-run free-text guidance goes to
+`POST /sessions/{id}/instruction` (chat composer).
 
 ## Ingestion status stepper
 
@@ -50,10 +55,13 @@ Resume: `POST /sessions/{id}/resume` with `{ action, edited_content? }` → new 
 
 Disable **Start generation** until `ready`.
 
-## Reconnect
+## Recovery (reconnect)
 
-On mount / SSE drop: `GET /sessions/{id}/state` → if `interrupt` present, render review
-card; resume with `POST /resume`, not `start`.
+The SSE stream always ends at an interrupt, and a refresh/disconnect **cancels the run
+server-side**. On mount: `GET /sessions/{id}/state` → if `interrupt` present, render the
+review card (resume with `POST /resume` + its `interrupt_id`); else if `next` non-empty
+and status non-terminal, offer `POST /sessions/{id}/continue` — it re-drives the
+checkpoint and re-fires the pending interrupt. Never re-POST a previous resume.
 
 ## Export (after `done`)
 

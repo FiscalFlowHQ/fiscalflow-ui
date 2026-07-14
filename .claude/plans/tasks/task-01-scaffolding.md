@@ -17,10 +17,13 @@ shell, and health-check — without breaking the legacy audit pages yet.
 
 **In:** folder structure under `src/`; `App.tsx` routes; `src/config/env.ts`;
 `src/layouts/AppShell.tsx`; `src/pages/HomePage.tsx` (placeholder); `src/pages/RunPage.tsx`
-(placeholder); update `vite.config.ts` proxy for direct BE paths (not only `/api/audits`);
-`.env.example`; basic Vitest setup optional but recommended.
+(placeholder); update `vite.config.ts` proxy for direct BE paths; `.env.example`;
+**Vitest + React Testing Library + msw + jsdom setup and a `test` script — MANDATORY,
+not optional** (tasks 02, 03, and 07 have unit-test DoDs and none of this exists in the
+repo today); install `react-markdown` (tasks 08/09 assume a `MarkdownView`).
 
-**Out:** API client (task 02), Tauri (task 14), removing legacy pages (task 15).
+**Out:** API client (task 02), Tauri (task 14 — note: greenfield, no `src-tauri/` exists),
+legacy page removal (task 15).
 
 ## Target structure
 
@@ -48,7 +51,13 @@ src/
 | `/` | `HomePage` | Session list (stub) |
 | `/run/:threadId` | `RunPage` | Workspace stub |
 | `/settings` | `SettingsPage` stub or route to task 13 |
-| `/review/:auditId` | `ReviewPage` | Legacy — keep working |
+| `/review/:auditId` | `ReviewPage` | Legacy — parked, see below |
+
+> **Legacy reality check:** the legacy pages call `/api/audits/*`
+> (`src/api/client.ts`), an endpoint that exists in **neither** repo (the Flask app in
+> `fiscalflow-api/apps/review_app.py` exposes different routes and is out of BE scope).
+> The legacy flow is dead code — keep the pages compiling, but do not treat "audit flow
+> works" as anything this task can preserve or verify.
 
 ## Interfaces exposed
 
@@ -69,15 +78,21 @@ Vite dev proxy: forward `/sessions`, `/documents`, `/health`, `/settings` to `:8
 - `HomePage`: "FiscalFlow" + "New FDD run" button (no-op until task 04) + backend status dot
   (`GET /health`).
 - Bearer token: centralize in a `getAuthHeaders()` helper used by task 02.
-- TypeScript strict mode; path alias `@/` → `src/` optional.
-- Do **not** add heavy UI libraries yet — use existing `global.css` dark theme.
+- TypeScript strict mode. **`noUnusedLocals`/`noUnusedParameters` are ON** — placeholder
+  pages with stub props will fail `npm run build`; underscore-prefix or omit unused params.
+- Do **not** add heavy UI libraries yet. `global.css` is NOT a reusable design system —
+  it is a fixed 4-row/2-col grid hard-wired to the audit screen with
+  `body { overflow: hidden }`; only the `:root` token block carries over. Budget a small
+  base-layout pass here.
+- CORS: the BE default origin is `http://localhost:1420` **only** (Tauri). The Vite dev
+  proxy keeps 5173 same-origin, but any `VITE_API_BASE_URL` direct-connect from 5173
+  needs `FISCALFLOW_CORS_ORIGINS` extended on the BE.
 
 ## Verification
 
 - `npm run dev` — all routes render without console errors.
-- `npm run build` passes.
+- `npm run build` and `npm test` pass.
 - `GET /health` via proxy shows green status on HomePage when API is up.
-- Legacy `/` audit upload still reachable (move to `/audit` only if you document in Handoff).
 
 ## Integration check
 

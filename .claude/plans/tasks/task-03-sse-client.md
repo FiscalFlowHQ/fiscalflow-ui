@@ -23,19 +23,19 @@ event lines.
 
 | `event` | `data` shape | Notes |
 |---|---|---|
-| `step` | `{ node: string, namespace: string[] }` | Pipeline rail |
-| `token` | raw string (JSON string or plain text) | Prose streaming |
-| `interrupt` | `InterruptEnvelope` JSON | Pause run |
+| `step` | `{ node: string, namespace: string[] }` | Pipeline rail. Inner nodes are `"{step}.{phase}"` (e.g. `draft.execute`) |
+| `token` | `{ text: string, node: string, namespace: string[] }` JSON | Prose only — BE emits tokens solely for the streaming execute nodes; no JSON-blob noise |
+| `interrupt` | `{ interrupt_id: string, ...InterruptEnvelope }` JSON | Pause. **The stream always ends here** — keep `interrupt_id`; resume needs it |
 | `done` | `{}` | Terminal success |
-| `error` | `{ message: string }` | Terminal failure |
+| `error` | `{ message: string }` | Terminal failure (BE also records `run_status: "failed"`) |
 
 ## Interfaces exposed
 
 ```typescript
 type SseEvent =
   | { type: "step"; node: string; namespace: string[] }
-  | { type: "token"; text: string }
-  | { type: "interrupt"; envelope: InterruptEnvelope }
+  | { type: "token"; text: string; node: string; namespace: string[] }
+  | { type: "interrupt"; interruptId: string; envelope: InterruptEnvelope }
   | { type: "done" }
   | { type: "error"; message: string };
 
@@ -44,11 +44,12 @@ type SseHandlers = {
   onClose?: () => void;
 };
 
-// POST body as JSON; response body is text/event-stream
+// POST body as JSON; response body is text/event-stream.
+// "continue" (recovery after a disconnect, task 11) takes no body.
 streamGeneration(
   threadId: string,
-  path: "start" | "resume",
-  body: StartGenerationRequest | ResumeRequest,
+  path: "start" | "resume" | "continue",
+  body: StartGenerationRequest | ResumeRequest | undefined,
   handlers: SseHandlers,
   signal?: AbortSignal,
 ): Promise<void>
@@ -59,9 +60,13 @@ streamGeneration(
 - Use `fetch` + `ReadableStream` reader (not `EventSource` — POST required). Parse
   `event:` / `data:` lines per SSE spec; buffer partial lines.
 - Pass `Authorization` header from task 01 helper.
-- On `interrupt`, **stop reading** — caller shows HITL UI; next call is `resume`.
-- On HTTP **409**, throw `ApiError` before stream read.
-- Support `AbortSignal` for cancel (task 11) — abort fetch when user cancels.
+- On `interrupt`, **stop reading** — the BE has already closed the stream; caller shows
+  HITL UI; the next call is `resume` (a NEW stream). There is no stream re-attach and no
+  `Last-Event-ID` replay — reconnection is `POST /continue` (task 11).
+- On HTTP **404/409/422**, throw `ApiError` before stream read (409 body says whether the
+  thread is mid-execution, cancelled, or the `interrupt_id` was stale).
+- Support `AbortSignal` for cancel (task 11) — abort fetch when user cancels. Note an
+  abort/refresh mid-stream cancels the run server-side; recovery is `/continue`.
 - Reference implementation: `fiscalflow-api/scripts/sse_client.py`.
 
 ## Verification

@@ -72,25 +72,41 @@ Tasks **07–09** can be built with mock SSE fixtures before **10** integrates t
 ## Environment notes
 
 - **API must be running** for tasks 04+ integration: `cd fiscalflow-api && uvicorn app.main:app --reload --port 8000`
-- **CORS**: backend defaults `http://localhost:1420` (Tauri) and Vite `5173` — add origin in BE settings if needed.
+- **CORS**: backend default is `http://localhost:1420` **only** (Tauri). Vite dev on 5173
+  works through the same-origin proxy; a `VITE_API_BASE_URL` direct-connect from 5173
+  needs `FISCALFLOW_CORS_ORIGINS` extended on the BE.
 - **No API keys required** for upload/ingest tests (keyless BM25). Generation needs a configured LLM or mocked `get_model` in BE tests only — UI can use real API with Z.ai key.
 - **Fixture databook**: `fiscalflow-api/tests/fixtures/sample_databook.xlsx`
-- **Manual SSE driver**: `fiscalflow-api/scripts/sse_client.py` — use to verify BE before UI SSE work.
+- **Manual SSE driver**: `fiscalflow-api/scripts/sse_client.py` — use to verify BE before UI SSE work, and to **record fixtures** (never hand-write SSE fixtures).
 
-## Backend implementation status (sync point — 2026-07-09)
+## Backend implementation status (sync point — 2026-07-13, post-remediation)
 
-All 15 backend tasks are **done**. UI can rely on the full contract:
+All 15 backend tasks are done, **plus a HITL/lifecycle remediation pass** (2026-07-13)
+that changed the contract. Key points:
 
 | BE capability | UI task |
 |---|---|
 | Sessions + checkpointer | 04, 11 |
-| SSE start/resume/cancel | 03, 06–11 |
-| Documents upload/status | 05 |
-| Retrieval + 9-step section graph | 07 (namespace labels) |
-| HITL `InterruptEnvelope` + `answer` action | 08 |
-| Assembly + `GET /document?format=md\|pptx\|pdf` | 15 |
-| `GET/PUT /settings/providers` | 13 |
-| Section catalog (`quality_of_earnings`, `business_overview`) | 06 |
+| SSE start/resume/**continue**/cancel | 03, 06–11 |
+| Documents upload/status (ref-keyed storage, 413 size cap, session check) | 05 |
+| Retrieval + 9-step section graph (5 nodes per step: `{id}.plan/.approve/.execute/.review/.join`) | 07 |
+| HITL `InterruptEnvelope` + `interrupt_id` + `attempt`; reject **regenerates** with `reason` | 08 |
+| `GET /state` → `interrupt` + live `section_state`; `GET /status` derives `awaiting_approval` | 09, 11 |
+| `GET /sections` catalog; `POST /sessions/{id}/instruction` | 06, 12 |
+| Assembly + `GET /document?format=md\|pptx\|pdf` (feature-detect from `metadata.artifacts`) | 15 |
+| `GET/PUT /settings/providers` (`available_providers` = objects) | 13 |
 
-Read BE handoffs for deviations: upload keeps **original filename**; `approval_policy` presets
-are `thorough` \| `balanced` (not free-form strings); clarification pauses use `action: "answer"`.
+Contract essentials every task must respect:
+- `POST /resume` **requires `interrupt_id`** (from the SSE `interrupt` event / `GET /state`);
+  stale or duplicate resumes get 409 and never touch the next gate.
+- The SSE stream **always ends at an interrupt**; a refresh/disconnect cancels the run
+  server-side; recovery is `POST /sessions/{id}/continue` (re-fires the pending interrupt).
+- `token` events are JSON `{text, node, namespace}`, prose steps only.
+- `approval_policy` presets are `thorough` | `balanced`; clarifications use `action: "answer"`.
+- `values.error` is `{message: string}`.
+
+**Known caveats (do not over-trust the contract):** BE acceptance #24 (inner-step SSE over
+namespaces) is *partial* — live pilots saw inconsistent surfacing; build the `GET /status`
+polling fallback (task 07). BE prompts still carry `TESTING-ONLY-ASSUME-VALUES` blocks —
+strip before acceptance runs (task 15). The legacy `/api/audits` flow is dead code in both
+repos (tasks 01/15).
