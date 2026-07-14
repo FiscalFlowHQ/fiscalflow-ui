@@ -43,17 +43,23 @@ Read `.claude/plans/BACKEND_CONTRACT.md` first, then `fiscalflow-api/app/api/sch
 | Endpoint | Purpose |
 |---|---|
 | `POST /sessions` | New `thread_id` |
-| `POST /documents` | Upload databook + bind to session |
+| `GET /sections` | Section catalog for the composer |
+| `POST /documents` | Upload databook + bind to session (413 over size cap; 404 unknown session) |
 | `GET /documents/{ref}/status` | Poll ingestion |
 | `POST /sessions/{id}/start` | SSE generation start |
-| `POST /sessions/{id}/resume` | SSE resume after pause |
-| `GET /sessions/{id}/state` | Reconnect / pending interrupt |
-| `GET /sessions/{id}/status` | `run_status`, `audit_status`, section index |
-| `POST /sessions/{id}/cancel` | Abort run |
-| `GET /sessions/{id}/document?format=` | Download assembled report (`md` / `pptx` / `pdf`) |
+| `POST /sessions/{id}/resume` | SSE resume after pause — **requires `interrupt_id`**; stale/duplicate → 409 |
+| `POST /sessions/{id}/continue` | SSE re-drive from checkpoint (recovery after refresh/disconnect; re-fires the pending interrupt) |
+| `POST /sessions/{id}/instruction` | Mid-run natural-language instruction (chat composer) |
+| `GET /sessions/{id}/state` | Reconnect: `values`, `next`, `interrupt` (+`interrupt_id`), live `section_state` |
+| `GET /sessions/{id}/status` | `run_status` (derives `awaiting_approval` when paused), `audit_status`, section index |
+| `POST /sessions/{id}/cancel` | Abort run → `{cancelled, was_running, run_status}`; 404 if never ran |
+| `GET /sessions/{id}/document?format=` | Download assembled report (`md` / `pptx` / `pdf`) — the only export path |
 | `GET/PUT /settings/providers` | Provider prefs (BE task 15 — live) |
 
-SSE events: `step`, `token`, `interrupt`, `done`, `error`.
+SSE events: `step` (`{node, namespace}`), `token` (`{text, node, namespace}` — prose steps
+only), `interrupt` (`{interrupt_id, ...envelope}`, **ends the stream**), `done`, `error`.
+Review-gate `reject` regenerates the step with the supplied `reason`; edits are validated
+against the step's output type.
 
 ## Tech stack
 
@@ -68,11 +74,13 @@ SSE events: `step`, `token`, `interrupt`, `done`, `error`.
 
 Dev: Vite proxies `/api` → `http://localhost:8000` today. Tauri uses `VITE_API_BASE_URL`.
 
-## Legacy code (do not delete until task 15)
+## Legacy code (dead — park it, don't preserve it)
 
-Current routes `/` and `/review/:auditId` target the **old Flask audit API** (`/api/audits`).
-The new FDD flow uses `fiscalflow-api` endpoints above. Migrate or hide legacy routes in
-task 15.
+Current routes `/` and `/review/:auditId` call `/api/audits/*` — an API that exists in
+**neither repo** (the Flask app in `fiscalflow-api/apps/review_app.py` exposes different
+routes and is declared out of BE scope). The legacy flow cannot work as-is; keep the pages
+compiling until task 15 parks or deletes them, and never treat "audit review reachable" as
+an acceptance criterion.
 
 ## Implementation protocol
 

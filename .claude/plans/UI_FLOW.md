@@ -1,70 +1,82 @@
 # FiscalFlow UI — Flow Reference
 
-> Companion to task files. Backend authority: `plans/BACKEND_CONTRACT.md` and
-> `fiscalflow-api/.claude/plans/backend-architecture.md` §8.
+> Companion to task files. Full narrative for designers/implementers.
+> Backend contract: `fiscalflow-api/.claude/plans/backend-architecture.md` §8.
 
 ## Routes (target)
 
 | Route | Screen |
 |---|---|
 | `/` | Session home — list + New FDD run |
-| `/run/:threadId` | Main workspace |
-| `/settings` | API URL, token, provider |
-| `/audit` | Legacy upload (task 15) |
-| `/review/:auditId` | Legacy audit review |
+| `/run/:threadId` | Main workspace (chat + pipeline + artifact + databook) |
+| `/settings` | API URL, token, provider, defaults |
+| `/review/:auditId` | Legacy audit review (deprecate in UI task 15) |
 
 ## Happy path
 
 ```
-New session → Upload databook → Poll until ready → Provider check → Select sections
-  → Start (SSE) → step events → interrupt → approve/edit/answer → resume (SSE)
-  → … → done → download md/pptx
+New session → Upload databook → Poll until ready → Select sections → Start (SSE)
+  → step events → interrupt → user approves/edits → resume (SSE) → … → done → export
 ```
 
 ## SSE → UI mapping
 
 | Event | UI |
 |---|---|
-| `step` | Pipeline rail (`node`, `namespace[]`) |
-| `token` | Live draft (plain text) |
-| `interrupt` | HITL card (structured renderer) |
-| `done` | Complete; fetch state + enable export |
-| `error` | Banner + `GET /state` |
+| `step` | Pipeline rail node complete (`node`, `namespace`) |
+| `token` | Append to artifact panel (prose steps) |
+| `interrupt` | Show HITL review card; wait for user |
+| `done` | Run complete; show final document |
+| `error` | Toast + recovery via `GET /state` |
 
-## InterruptEnvelope
+## InterruptEnvelope (every pause)
 
-See `BACKEND_CONTRACT.md` for full content matrix. Resume always:
-`POST /sessions/{id}/resume` with `{ action, edited_content? }` → new SSE stream.
+```typescript
+{
+  interrupt_id: string,               // resume token — required back on POST /resume
+  tier: "global" | "section" | "step",
+  phase: "plan" | "review" | "clarification",
+  section_id: string | null,
+  step_id: string | null,
+  content: object,                    // review: { [output_key]: value, attempt: n }
+  allowed_actions: ("approve" | "edit" | "reject" | "answer")[]
+}
+```
 
-## Ingestion stepper
+Resume: `POST /sessions/{id}/resume` with
+`{ action, interrupt_id, edited_content?, reason? }` → new SSE stream. A stale/duplicate
+`interrupt_id` gets 409 (refetch `GET /state`). `reject` regenerates the step using
+`reason` as feedback. Mid-run free-text guidance goes to
+`POST /sessions/{id}/instruction` (chat composer).
+
+## Ingestion status stepper
 
 `uploaded` → `auditing` → `ingesting` → `ready` | `failed`
 
-Disable **Start** until `ready` **and** provider `key_present`.
+Disable **Start generation** until `ready`.
 
-## Reconnect & SSE limitation
+## Recovery (reconnect)
 
-On mount:
+The SSE stream always ends at an interrupt, and a refresh/disconnect **cancels the run
+server-side**. On mount: `GET /sessions/{id}/state` → if `interrupt` present, render the
+review card (resume with `POST /resume` + its `interrupt_id`); else if `next` non-empty
+and status non-terminal, offer `POST /sessions/{id}/continue` — it re-drives the
+checkpoint and re-fires the pending interrupt. Never re-POST a previous resume.
 
-1. `GET /status` + `GET /state`
-2. If `interrupt` → show HITL; resume with `POST /resume` (never `start`)
-3. If run active but no SSE (page refresh) → **`server_running`** banner + poll every ~4s
-4. **Cannot** re-attach to in-flight SSE for live tokens
+## Export (after `done`)
 
-## `run_status` badges (home + run header)
+`GET /sessions/{threadId}/document?format=md|pptx|pdf` — 404 until run completed.
+Default (no `format`) serves best available (`pdf` > `pptx` > `md`).
 
-Backend values only — pause = `state.interrupt != null`. See `BACKEND_CONTRACT.md`.
+## Clarification pauses
 
-## Export (after `completed`)
-
-`GET /sessions/{threadId}/document?format=md|pptx|pdf`
-
-Preview sections from `values.completed_sections[].draft` (not `final_report`).
+When `phase: "clarification"` and `allowed_actions` includes `"answer"`, render a Q&A form
+from `content` and resume with `{ action: "answer", edited_content: { … } }`.
 
 ## Layout (run workspace)
 
 ```
-┌ TopBar: title, status chip, cancel, settings ───────────────┐
-├ Pipeline rail │ Artifact panel │ Databook + Composer + HITL ─┤
-└──────────────────────────────────────────────────────────────┘
+┌ TopBar: title, cancel, settings ─────────────────────────────┐
+├ Sessions │ Pipeline rail │ Chat + Artifact panel │ Databook ─┤
+└ Composer: sections, instruction, policy, Start ──────────────┘
 ```

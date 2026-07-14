@@ -1,68 +1,77 @@
 # Task 15 — Export, polish & acceptance
 
-> **Context recap:** Final integration — export, legacy migration, polish, acceptance.
+> **Context recap:** Final integration pass — document export, legacy route migration,
+accessibility polish, and acceptance checklist aligned with backend MVP.
 
-**Docs to read:** `plans/BACKEND_CONTRACT.md`, BE task-14/15, legacy pages.
+**Docs to read:** `plans/UI_FLOW.md`, BE task-14/15 when available, legacy `UploadPage`/`ReviewPage`.
 
 ## Goal
 
-Ship-ready UI with export, legacy route migration, and documented acceptance.
+**Ship-ready UI**: export final report, migrate/remove legacy audit-only flow, acceptance
+tests, and README update.
 
-## Dependencies: tasks 10–14 (13 parallel).
+## Dependencies: tasks 10–14 (13 can run in parallel).
 
 ## Scope
 
-### 1. Export
+**In:**
 
-- Primary: `GET /sessions/{id}/document?format=md|pptx|pdf` → save via blob download.
-- Buttons: Markdown, PowerPoint, PDF (disable PDF if 404 — no LibreOffice on server).
-- Default download (no format): best available artifact.
-- Fallback copy: show `completed_sections[].draft` in UI only — not a file export.
-- **Optional:** per-section pptx if `metadata.artifacts` exposes section paths after `collect_section`.
+1. **Export** — `GET /sessions/{id}/document?format=md|pptx|pdf` is the **only** export
+   path. There is no client-side fallback: `values.final_document` and
+   `metadata.artifacts` are **server filesystem paths** the browser cannot read.
+   **Feature-detect formats** from `GET /state → values.metadata.artifacts` keys (the BE
+   silently degrades to markdown-only when PPTX/PDF rendering fails; pdf needs
+   LibreOffice) — render only the buttons for artifacts that exist; a request for a
+   missing one is 404, an unknown `?format=` is 422.
+2. **Legacy parking** — the legacy audit flow is **dead code**: it calls `/api/audits/*`,
+   which exists in neither repo (the Flask `apps/review_app.py` exposes different routes
+   and is out of BE scope). Park or delete the legacy pages; redirect `/` to Home;
+   document in the README that csv-fixer audit review is not served by this app. Do NOT
+   carry a "legacy still works" acceptance item — it can never pass.
+3. **Polish** — keyboard focus on HITL buttons; loading skeletons; empty states audit.
+4. **Acceptance checklist** (manual + automated).
+5. **README** — architecture diagram, env vars, dev workflow with sibling `fiscalflow-api`.
 
-### 2. Legacy migration
+**Out:** New backend features; E2E Playwright in CI (optional stretch).
 
-- Move audit UI: `/audit` → `UploadPage`, keep `/review/:auditId`.
-- `/` → `HomePage` (FDD).
-- Document csv-fixer legacy scope in README.
+## Blocking pre-acceptance item (backend)
 
-### 3. Polish
-
-- HITL keyboard focus; loading skeletons; empty states.
-- `server_running` banner copy review (task 10/11).
-
-### 4. Testing
-
-- Vitest suite green (tasks 02–03 + component tests).
-- Optional: Playwright happy path (stretch).
-
-### 5. README
-
-- Two-repo dev workflow, env vars, acceptance checklist reference.
+BE prompts still contain `TESTING-ONLY-ASSUME-VALUES` blocks
+(`app/prompts/steps/draft.execute.md`, `build_outline.execute.md`) that let the model
+**invent figures** when data is missing. Strip them (BE change) before running this
+checklist — otherwise every acceptance run "passes" on fabricated numbers, which is the
+exact failure mode this product exists to prevent.
 
 ## Acceptance checklist
 
 | # | Scenario | Pass criteria |
 |---|---|---|
-| 1 | Cold start | Home loads; health green |
-| 2 | New session | Creates thread → run page |
-| 3 | Upload | Fixture → `ready` |
-| 4 | Provider gate | Start blocked without `key_present` |
-| 5 | Start run | SSE steps on rail |
-| 6 | HITL | Structured interrupt card; approve resumes |
-| 7 | Clarification | Answer form works if triggered |
-| 8 | Complete | Download md + pptx |
-| 9 | Reconnect | Refresh at pause → HITL restored |
-| 10 | Server running | Refresh mid-run → banner, no hung spinner |
-| 11 | Cancel | Run stops |
-| 12 | Settings | Token + provider persist |
-| 13 | Tauri | Desktop upload works |
-| 14 | Legacy | `/audit` still works if kept |
-| 15 | Build | `npm run build` (+ `tauri build`) clean |
+| 1 | Cold start | Home loads, health green with API up |
+| 2 | New session | Creates thread, navigates to run |
+| 3 | Upload | Fixture databook reaches `ready`; re-upload keeps `ready` |
+| 4 | Start run | SSE steps appear on rail (balanced preset) |
+| 5 | HITL | Interrupt shown; approve resumes; **reject regenerates**; a draft edit survives into the export |
+| 6 | Complete | Download md (+pptx if in `artifacts`); report tab shows content |
+| 7 | Recovery | Refresh mid-pause → `/continue` re-fires the same interrupt; next gate still pauses |
+| 8 | Cancel | Paused run: `{cancelled: true, was_running: false}`; UI recoverable; resume-after-cancel surfaces 409 |
+| 9 | Settings | Token persisted, health test works |
+| 10 | Tauri | Desktop build opens and uploads file |
+| 11 | Instruction | Mid-run composer message reaches the next plan (`instruction_history`) |
+| 12 | Build | `npm run build` + `npm test` + `tauri build` clean |
+
+## Implementation notes
+
+- Run full checklist against local BE with Z.ai or mock provider.
+- Cross-link UI tasks in Handoff to any BE gaps found.
+
+## Verification
+
+- All 12 acceptance rows documented in Handoff with pass/fail.
+- No console errors on happy path.
 
 ## Definition of done
 
-Export + migration + 15-row acceptance in Handoff; tracker reviewed.
+Export works; README updated; acceptance table in Handoff; tracker all `reviewed`.
 
 ---
 

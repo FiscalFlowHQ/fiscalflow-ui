@@ -46,7 +46,10 @@ Show `audit_status` when present (e.g. `passed` / `failed`).
 - Accept `.xlsx`, `.xls`, `.xlsm`, `.xlsb` (match BE).
 - Display truncated `document_ref` + original filename.
 - Stop polling on unmount; restart if `documentRef` changes.
-- Re-upload overwrites same filename on BE — confirm if run already started.
+- Uploads are stored under `upload_dir/<document_ref>/<filename>` on the BE — same-name
+  files from different sessions can't clobber each other, and re-uploading identical
+  bytes of an already-`ready` document keeps its status (no re-ingestion). Oversized
+  uploads get 413; an unknown `thread_id` gets 404.
 - Use `fiscalflow-api/tests/fixtures/sample_databook.xlsx` for manual QA (~seconds).
 
 ## Verification

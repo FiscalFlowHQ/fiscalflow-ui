@@ -1,83 +1,94 @@
 # Task 11 — Reconnect, cancel & error handling
 
-> **Context recap:** Runs can outlive the browser tab. State endpoints restore UI; cancel
-aborts server work; HTTP/SSE errors need recovery paths. **No mid-run SSE reattach.**
+> **Context recap:** Runs can outlive the browser tab — but a refresh **kills the stream
+> and stops the run** (the disconnect cancels the BE producer task mid-step). Recovery is
+> `POST /sessions/{id}/continue`, which re-drives the run from its checkpoint; a paused
+> run re-fires its current interrupt. There is no stream re-attach.
+>
+> **Rewritten after the BE remediation:** `/continue` now exists, `run_status` is derived
+> honestly, and cancel semantics changed.
 
-**Docs to read:** `plans/BACKEND_CONTRACT.md`, BE task-08 handoff.
+**Docs to read:** BE `app/api/routers/generation.py` (guards on resume/continue/cancel),
+`app/api/routers/sessions.py`, `plans/UI_FLOW.md`.
 
 ## Goal
 
-**Resilient lifecycle**: reconnect on mount, poll while server runs without SSE, cancel,
-comprehensive error UX.
+**Resilient run lifecycle**: recover on page load via `/continue`, cancel runs, global
+error toasts and retry paths.
 
 ## Dependencies: task 03, task 10.
 
 ## Scope
 
-**In:** `src/hooks/useSessionReconnect.ts`; `src/hooks/useRunPolling.ts`; cancel wiring;
-`src/components/feedback/ErrorBanner.tsx`; `src/components/feedback/Toast.tsx`;
-`src/lib/runStatusBadge.ts` (shared with task 04).
+**In:** `src/hooks/useSessionReconnect.ts`; cancel button wiring; `src/components/feedback/ErrorBanner.tsx`;
+`src/components/feedback/Toast.tsx` (or minimal context); orchestrator updates.
 
-**Out:** Offline queueing; WebSocket.
+**Out:** Offline mode; WebSocket (not used).
 
-## Reconnect flow (on `RunPage` mount)
+## run_status (real enum — `app/graph/state.py`)
 
-1. `getSessionStatus(threadId)` + `getSessionState(threadId)` in parallel.
-2. If `state.interrupt` → orchestrator `paused`; render HITL from envelope.
-3. If `run_status` ∈ `{ ingesting, planning, awaiting_approval, generating, reviewing, assembling }`
-   and no local SSE → `server_running` + start polling.
-4. If `completed` / `failed` / `cancelled` → hydrate artifacts + rail best-effort from `values` + `next`.
-5. Never call `start` when `interrupt` present — use `resume` only.
+`ingesting` | `planning` | `awaiting_approval` | `generating` | `reviewing` | `assembling`
+| `completed` | `failed` | `cancelled`. (No `idle` / `running` / `interrupted`.)
+`GET /status` reports `awaiting_approval` whenever an interrupt is pending (derived
+server-side), and a crashed run now reads `failed`. **The authoritative pause signal is
+still `GET /state → interrupt != null`** — use `/status` for cheap polling only.
 
-## Polling (`useRunPolling`)
+## Recovery flow
 
-- Interval: 4s while `server_running`; stop on terminal status or `interrupt`.
-- On `interrupt` → stop poll, show HITL.
-- On `completed` → stop poll, refresh artifacts, enable export.
+On `RunPage` mount:
+
+1. `getSessionState(threadId)` → hydrate `values`, `section_state`, `interrupt`.
+2. If `interrupt != null` → render the HITL card (with its `interrupt_id`); the user
+   resumes normally. No `/continue` needed.
+3. Else if `next` non-empty and status not terminal → the run was killed mid-step by the
+   disconnect. Show "Run was interrupted by the disconnect — resume?" and call
+   `POST /sessions/{id}/continue`; its response is a live SSE stream (same handlers as
+   start). A paused-at-gate run re-fires the interrupt; a mid-node run re-executes the
+   pending node. **Never** re-POST the last resume — a stale resume gets 409.
+4. Else render by terminal status (`completed` → Report tab; `failed` → `error.message`;
+   `cancelled` → composer).
+
+The Live-tab token buffer is gone after a refresh (tokens are never persisted) — rebuild
+prose views from `section_state.draft` / `completed_sections`.
 
 ## Cancel flow
 
-- Confirm dialog → `cancelRun(threadId)`.
-- `AbortSignal` on active SSE fetch.
-- Expect `{ cancelled: true, run_status: "cancelled" }`.
+- `cancelRun(threadId)` on user confirm; abort in-flight SSE via `AbortSignal`.
+- Response: `{ cancelled: true, was_running: boolean, run_status: "cancelled" }` —
+  `was_running: false` is the **normal** case for a paused run (no live task to kill);
+  it is still cancelled. Unknown thread → 404.
+- A cancelled run cannot be resumed or continued (409) — reset to the composer.
 
-## Error handling matrix
+## Error handling
 
 | Case | UX |
 |---|---|
-| SSE `error` | Banner + `values.error` if available; "View state" |
-| HTTP **401** | "Invalid API token" → link Settings |
-| HTTP **400** | Show `detail` (bad section/policy) |
-| HTTP **409** start/resume | "Run already active" — offer poll/reconnect |
-| HTTP **404** document download | "Report not ready yet" |
-| HTTP **503** | "Backend starting — retry" |
-| `run_status: failed` + `values.error` | Failed banner (ingest/audit_gate/runtime) |
-| Network offline | Sticky banner + retry |
-| Upload 503 | Retry upload |
+| SSE `error` | Banner + `message`; `run_status` is now also `failed` server-side; offer "View state" |
+| HTTP 409 on start | "Run already active" + recover via flow above |
+| HTTP 409 on resume | Stale/duplicate interrupt — refetch `GET /state`, re-render its `interrupt` |
+| Network offline | Sticky banner; retry button |
+| Upload 413 | "File exceeds the size limit" |
+| Upload 503 | "Backend busy" retry |
 
-## `run_status` reference (backend — do not invent values)
-
-`ingesting` | `planning` | `awaiting_approval` | `generating` | `reviewing` |
-`assembling` | `completed` | `failed` | `cancelled`
-
-There is **no** `idle`, `running`, or `interrupted` on the wire. Map to UI in orchestrator only.
-
-## Implementation notes
-
-- Process restart + resume: BE checkpoint survives — UI uses same `thread_id` + `resume`.
-- Double-click approve: disable button until SSE opens (409 guard).
-- Don't drop local session on errors.
+- `values.error` is a `{ message: string }` dict.
+- Don't lose local session on error. Log errors to console in dev only.
 
 ## Verification
 
-- Refresh at pause → HITL restored without `start`.
-- Refresh mid-run (no pause) → `server_running` banner + eventual completion or pause.
-- Cancel → spinner stops; `cancelled` status.
-- Wrong token → 401 toast.
+- Refresh mid-run → recovery banner → `/continue` → the same interrupt re-fires (same
+  `interrupt_id`) and the flow proceeds; the *next* gate still pauses.
+- Cancel a paused run → `{cancelled: true, was_running: false}`; UI stops; resume
+  afterwards → 409 surfaced as "run was cancelled".
+- Simulate SSE error → banner shows and `/status` reads `failed`.
+
+## Integration check
+
+BE `GET /state` returns `next`, `interrupt` (with `interrupt_id`) and `section_state`
+when paused.
 
 ## Definition of done
 
-Reconnect + poll + cancel + full error matrix; Handoff notes.
+Recovery + cancel + error UX; Handoff documents any remaining lifecycle gaps.
 
 ---
 

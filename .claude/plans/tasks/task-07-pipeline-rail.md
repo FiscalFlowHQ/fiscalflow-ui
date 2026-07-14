@@ -2,107 +2,127 @@
 
 > **Context recap:** SSE `step` events carry `node` and `namespace` (outer + inner graph).
 > The rail gives users orientation during long runs.
+>
+> **Rewritten after the BE contract audit:** the old version of this task invented outer
+> phase names and a namespace format that do not exist. Everything below is verified
+> against `fiscalflow-api` code.
 
-**Docs to read:** `plans/BACKEND_CONTRACT.md` (outer nodes + regen), BE task-08 handoff,
-`app/graph/outer.py`, `app/graph/registry.py`.
+**Docs to read:** BE `app/graph/outer.py` (`build_outer_graph`), `app/graph/registry.py`
+(`SECTION_STEP_ORDER`), `app/graph/nodes/base.py` (`make_step_cycle`), `plans/UI_FLOW.md` (Phase D).
 
 ## Goal
 
-**Vertical pipeline rail** that updates from SSE `step` events — real outer nodes and inner
-section steps — with active/completed/pending/skipped states.
+**Vertical pipeline rail** that updates from SSE `step` events — outer nodes grouped into
+display phases, and inner section steps with their plan/approve/execute/review sub-states.
 
 ## Dependencies: task 03.
 
 ## Scope
 
 **In:** `src/components/pipeline/PipelineRail.tsx`; `src/components/pipeline/pipelineModel.ts`;
-`src/hooks/usePipelineProgress.ts` (reducer from `step` events); `src/config/pipelineNodes.ts`.
+`src/hooks/usePipelineProgress.ts` (reducer from `step` events).
 
 **Out:** HITL cards (task 08); layout placement (task 10).
 
-## Outer nodes (canonical — from `outer.py`)
+## Outer graph nodes (real — `outer.py:build_outer_graph`)
 
-Use this exact list; **do not** use fictional names like `plan_report` or `section_loop`:
+The outer graph has **13 nodes**, not 5 phases. Group them for display:
 
-| Node | Label (suggested) | Notes |
-|---|---|---|
-| `ingest` | Verify databook | |
-| `audit_gate` | Audit gate | Run may END here on failure |
-| `global_plan` | Global plan | |
-| `approve_global` | Review global plan | Skipped when policy skips gate |
-| `select_next_section` | Next section | Repeats per section |
-| `section_plan` | Section plan | |
-| `approve_section` | Review section plan | Optional gate |
-| `run_section` | Generate section | Parent of inner steps |
-| `review_section` | Review section output | Optional gate |
-| `collect_section` | Collect section | Per-section PPTX written |
-| `compact_findings` | Compact findings | May loop back |
-| `cross_section_review` | Cross-section review | |
-| `assemble_document` | Assemble report | Terminal outer step |
+| Display phase | BE nodes |
+|---|---|
+| Ingest | `ingest`, `audit_gate` |
+| Plan | `global_plan`, `approve_global` |
+| Section loop (×N) | `select_next_section`, `section_plan`, `approve_section`, `run_section`, `review_section`, `collect_section` |
+| Review & assemble | `compact_findings`, `cross_section_review`, `assemble_document` |
 
-## Inner section steps (under `run_section`)
+There is **no** `plan_report`, `section_loop`, `assemble_report`, or `finalize` node —
+key the reducer on the names above only.
 
-From `SECTION_STEP_ORDER`: `gather_context`, `distill_context`, `build_outline`, `draft`,
-`persona_review`, `polish`, `synthesize_claims`, `quality_gate`, `human_review`.
+## Inner section steps (per section)
 
-Nest under current `section_id` (from namespace or `GET /state` → `sections[current_section_index]`).
+From BE `SECTION_STEP_ORDER` (`app/graph/registry.py`): `gather_context`, `distill_context`,
+`build_outline`, `draft`, `persona_review`, `polish`, `synthesize_claims`, `quality_gate`,
+`human_review`.
 
-## Namespace parsing
+**Each step is five graph nodes**, and `step` events carry the *node* names:
+`{id}.plan`, `{id}.approve`, `{id}.execute`, (`{id}.clarify`,) `{id}.review`, `{id}.join`
+(`human_review` is a single `{id}.review` node). The rail must use a **two-level model —
+step → phase**: one rail entry per step, with the node suffix driving a sub-state so the
+UI can say "planning draft" / "awaiting your approval" / "drafting" / "review the draft".
 
-- `step.data.namespace` is `string[]` from LangGraph (`subgraphs=True`).
-- Outer nodes: typically short namespace (e.g. `[]` or one segment).
-- Inner steps: deeper paths under `run_section` — **log live samples** in Handoff; do not
-  hard-code `section_loop:…` (node does not exist).
-- Map `node` name to rail id; use namespace only to group inner steps under the active section.
+## Section identity — NOT from the namespace
+
+Inner `step` events arrive as `{"node": "draft.execute", "namespace": ["run_section:<uuid>"]}`.
+The namespace carries a **run-instance UUID, not the section id** — the section cannot be
+recovered from the event. Track it separately: `current_section_index` +
+`selected_sections` (from the start request / `GET /state`), advanced on each
+`select_next_section` / `collect_section` step event.
 
 ## State model
 
 ```typescript
-type StepStatus = "pending" | "active" | "done" | "skipped" | "failed";
+type StepStatus = "pending" | "active" | "done" | "skipped" | "regenerating";
+type StepPhase = "plan" | "approve" | "execute" | "clarify" | "review" | null;
 
 type PipelineStep = {
-  id: string;           // node name or "run_section:draft"
+  id: string;            // e.g. "draft" — node suffix stripped
   label: string;
   status: StepStatus;
-  namespace: string[];
-  sectionId?: string;
+  phase: StepPhase;      // the active sub-state within the step cycle
+  sectionId: string | null; // tracked via the section cursor, not the namespace
 };
 ```
 
-## Reducer rules
+Reducer rules:
 
-- On `step` for node N: mark previous `active` → `done`, N → `active`.
-- **Regen / loop-back:** if N was already `done`, set N → `active` again (do not assume monotonic progress).
-- Gate nodes never visited (balanced policy): leave `skipped`, not `pending` forever.
-- On `interrupt`: keep current step `active` + badge "Awaiting review".
-- On `done`: mark all visited `done`.
-- On `error` or `values.run_status === "failed"`: active → `failed`.
-- On reconnect (task 11): hydrate from `GET /state` → `next` + `run_status` + `current_section_index`; best-effort only.
+- `step` for `"{id}.{suffix}"` → split on the last `.`; update that step's `phase`;
+  first event for a step marks the previous active step `done`, this one `active`.
+- Outer node names have no suffix — they map to the display phases table above.
+- **Loop-aware (mandatory):** a `step` event for a node already `done` means
+  **regeneration** (quality-gate failure loops back to `draft.plan` or
+  `gather_context.plan`, bounded by `MAX_REGEN=2`; clarification re-runs `execute` up to
+  2×; review-gate rejects re-enter `{id}.plan`). Reset that step and everything after it
+  to `pending`, mark it `regenerating`, and show a regen badge. A strictly-forward reducer
+  will contradict itself on every loop.
+- On `interrupt` → keep current step `active`, badge "Awaiting review" (the envelope's
+  `step_id`/`phase` tell you which sub-state).
+- On `done` → all `done`. On `error` → active step gets `failed` styling.
 
 ## UI
 
 - Left rail ~240px; icons + labels; scroll if many inner steps.
-- Section headers when multiple sections selected (collapse inner steps).
-- Optional elapsed timer on active step.
+- Optional elapsed timer per active step.
+- Collapse inner steps under a section header when multiple sections are selected
+  (header text from the section cursor).
 
 ## Implementation notes
 
-- Seed from `pipelineNodes.ts`; human-readable labels map.
-- Capture fixture: run `sse_client.py` and save first 30 `step` lines for unit tests.
+- Seed initial state from the static step list; don't guess completion on reconnect until
+  task 11 hydrates from `GET /state` (`values.current_section_index`, `section_state.step_trace`).
+- Human-readable labels map (`ingest` → "Ingesting databook", `draft`+`phase:"plan"` →
+  "Planning the draft", …).
+- **Fallback:** BE acceptance #24 records that inner-step SSE events surfaced
+  *inconsistently* in live pilots. Poll `GET /sessions/{id}/status` (now returns a derived
+  `awaiting_approval` when paused) as a resilience fallback; never let the rail be the only
+  signal that a run is paused — `GET /state → interrupt` is authoritative.
 
 ## Verification
 
-- Unit test reducer with recorded `step` sequence from live BE run.
-- Regen fixture: same inner step twice → step becomes active again.
-- Gate-skipped run (`balanced`) → approve nodes show `skipped`.
+- Unit test reducer with a **recorded** SSE fixture (capture with
+  `fiscalflow-api/scripts/sse_client.py` against a real run). Do NOT hand-write the
+  fixture — hand-written event shapes are how this task previously acquired four
+  fabricated node names.
+- Fixture must include a regeneration loop (force `verdict: fail` once) to exercise the
+  loop-aware reset.
+- Visual: mock stream of `step` events updates rail correctly.
 
 ## Integration check
 
-Live SSE `node` names match `pipelineNodes.ts` (update config if BE adds nodes).
+Live SSE node names match the reducer's step list (log mismatches in Handoff).
 
 ## Definition of done
 
-Pipeline rail + hook + fixtures; Handoff notes on namespace samples.
+Pipeline rail + hook; loop-aware reducer tests from a recorded fixture; Handoff notes.
 
 ---
 

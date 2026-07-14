@@ -2,112 +2,98 @@
 
 > **Context recap:** The UI is transport-only; all contracts mirror
 > `fiscalflow-api/app/api/schemas.py` and §8.2. Read task 01 handoff for `config` +
-> `getAuthHeaders`. Full field reference: `plans/BACKEND_CONTRACT.md`.
+> `getAuthHeaders`.
 
-**Docs to read:** `fiscalflow-api/app/api/schemas.py`, `app/graph/state.py`,
-`app/api/routers/*.py`, `plans/BACKEND_CONTRACT.md`.
+**Docs to read:** `fiscalflow-api/app/api/schemas.py`, `app/api/routers/*.py` (sessions,
+documents, generation stubs).
 
 ## Goal
 
 Typed TypeScript models and a thin `fetch` wrapper for every **non-streaming** backend
-endpoint the UI needs — including partial `ReportState` for reconnect/export.
+endpoint the UI needs.
 
 ## Dependencies: task 01.
 
 ## Scope
 
-**In:** `src/types/api.ts`; `src/types/report-state.ts`; `src/api/fiscalflow.ts`;
-`src/api/http.ts` (base request + `ApiError`); Vitest + MSW setup (minimal).
+**In:** `src/types/api.ts`; `src/api/fiscalflow.ts` (new client alongside legacy
+`src/api/client.ts`); `src/api/http.ts` (base request helper with auth + errors).
 
 **Out:** SSE (task 03); React hooks (tasks 04+).
 
 ## Types to mirror (from BE)
 
 ```typescript
-// --- API envelopes ---
-SessionResponse { thread_id: string }
-DocumentUploadResponse { document_ref: string }
-DocumentStatusResponse { status: DocumentStatus; audit_status?: string; error?: string }
-DocumentStatus = "uploaded" | "auditing" | "ingesting" | "ready" | "failed"
-
-StartGenerationRequest {
-  selected_sections: string[];
-  document_ref?: string | null;
-  instruction?: string | null;
-  approval_policy?: "thorough" | "balanced";  // default "thorough"
-  provider_override?: string | null;
-}
+SessionResponse { thread_id }
+DocumentUploadResponse { document_ref }
+DocumentStatusResponse { status, audit_status?, error? }
+StartGenerationRequest { selected_sections, document_ref?, instruction?, approval_policy?, provider_override? }
+  // approval_policy: "thorough" | "balanced" (BE presets; UI defaults to "balanced")
 ResumeRequest {
-  action: "approve" | "edit" | "reject" | "answer";
-  edited_content?: Record<string, unknown> | null;
+  action: "approve"|"edit"|"reject"|"answer",
+  interrupt_id: string,                                  // REQUIRED — from the envelope
+  edited_content?: Record<string, unknown> | unknown[] | string | null,
+  reason?: string                                        // free text with "reject"
 }
-InterruptEnvelope { tier, phase, section_id, step_id, content, allowed_actions }  // see BACKEND_CONTRACT
-
-SessionStateResponse {
-  values: Partial<ReportState>;
-  next: string[];
-  interrupt: InterruptEnvelope | null;
+InstructionRequest { text: string }                       // POST /sessions/{id}/instruction
+InterruptEnvelope {
+  interrupt_id: string,
+  tier: "global"|"section"|"step",
+  phase: "plan"|"review"|"clarification",
+  section_id, step_id,
+  content: Record<string, unknown>,                       // review: { [output_key]: value, attempt: n }
+  allowed_actions: ("approve"|"edit"|"reject"|"answer")[]
 }
-SessionStatusResponse {
-  run_status: RunStatus | null;
-  audit_status: string | null;
-  current_section_index: number | null;
-}
-
+SectionCatalogResponse { sections: { id, title, order, required_structure }[] }  // GET /sections
+SessionStateResponse { values, next: string[], interrupt: InterruptEnvelope | null, section_state: SectionState | null }
+SessionStatusResponse { run_status, audit_status, current_section_index }
+  // run_status: "ingesting"|"planning"|"awaiting_approval"|"generating"|"reviewing"|"assembling"|"completed"|"failed"|"cancelled"
+CancelResponse { cancelled: boolean, was_running: boolean, run_status: "cancelled" }
 ProviderSettingsResponse {
-  provider: string | null;
-  model: string | null;
-  available_providers: Array<{
-    provider: string;
-    default_model: string | null;
-    key_present: boolean;
-  }>;
+  provider: string | null, model: string | null,
+  available_providers: { provider: string; default_model: string; key_present: boolean }[]
+  // array of OBJECTS — not strings
 }
-
-// --- Report state (partial; see report-state.ts) ---
-RunStatus =
-  | "ingesting" | "planning" | "awaiting_approval" | "generating"
-  | "reviewing" | "assembling" | "completed" | "failed" | "cancelled";
-
-CompletedSection { id, title?, order?, draft?, claims?, quality_verdict? }
-ReportState { databook_ref, completed_sections, run_status, error, metadata, final_document, ... }
+RunError { message: string }                              // values.error shape
 ```
+
+Document `status` union: `uploaded | auditing | ingesting | ready | failed`.
 
 ## Functions to expose
 
 ```typescript
+// src/api/fiscalflow.ts
 createSession(): Promise<SessionResponse>
+listSections(): Promise<SectionCatalogResponse>
 uploadDocument(threadId: string, file: File): Promise<DocumentUploadResponse>
 getDocumentStatus(documentRef: string): Promise<DocumentStatusResponse>
 getSessionState(threadId: string): Promise<SessionStateResponse>
 getSessionStatus(threadId: string): Promise<SessionStatusResponse>
-cancelRun(threadId: string): Promise<{ cancelled: boolean; run_status: string }>
+sendInstruction(threadId: string, text: string): Promise<{ ok: boolean; instruction_count: number }>
+cancelRun(threadId: string): Promise<CancelResponse>
 downloadDocument(threadId: string, format?: "md" | "pptx" | "pdf"): Promise<Blob>
 getProviderSettings(): Promise<ProviderSettingsResponse>
-setProviderSettings(body: { provider: string; model?: string }): Promise<{ provider: string; model?: string | null }>
+setProviderSettings(body: { provider: string; model?: string }): Promise<{ provider: string; model?: string }>
 checkHealth(): Promise<{ status: string }>
-
-// helpers
-export function isProviderReady(settings: ProviderSettingsResponse): boolean
-export function formatApiError(err: ApiError): string
 ```
+
+(`start`/`resume`/`continue` are SSE — task 03.)
 
 ## Implementation notes
 
 - `uploadDocument`: `FormData` with `file` + `thread_id` (matches BE `documents.py`).
-- `ApiError`: `{ status: number; detail: string }` for 400, 401, 404, 409, 422, 503.
-- `downloadDocument`: `response.blob()`; check `Content-Disposition` for filename optional.
-- `isProviderReady`: true when stored `provider` has `key_present` in `available_providers`
-  (used by task-06 Start gate — does not require Settings page to exist).
-- Keep **legacy** `client.ts` untouched — audit API is separate.
+- Map `HTTP 400 / 404 / 409 / 413 / 422 / 503` to typed errors (`ApiError` with
+  `status`, `detail`). 400 = validation (empty/unknown sections, blank instruction);
+  409 = concurrency/stale-interrupt/cancelled; 413 = upload too large; 422 = body-shape
+  (e.g. missing `interrupt_id`) or unknown `?format=`.
+- Keep **legacy** `client.ts` untouched — but know it targets `/api/audits`, which no
+  backend serves (see task 01 note).
 - Base URL: prepend `config.apiBaseUrl` to paths like `/sessions`.
-- Add `src/test/setup.ts` + Vitest config if not present (task-01 may have stubbed).
 
 ## Verification
 
-- Unit tests with MSW: happy path + 401 + 404 + 409 for session/state/download.
-- `isProviderReady` tests with mocked provider list.
-- Manual: `createSession()` + `checkHealth()` from dev console.
+- Unit tests with `msw` or mocked `fetch` for each function (happy + 404).
+- Manual: call `createSession()` + `checkHealth()` from browser console or a dev button.
 
 ## Integration check
 
@@ -115,7 +101,7 @@ Task 01 routes still work; no regression on legacy audit client.
 
 ## Definition of done
 
-Typed REST client + `ReportState` partial types + tests; Handoff lists any schema drift.
+Typed REST client complete and tested; Handoff lists any schema drift from BE.
 
 ---
 

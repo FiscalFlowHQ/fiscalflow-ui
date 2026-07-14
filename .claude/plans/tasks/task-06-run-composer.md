@@ -2,86 +2,84 @@
 
 > **Context recap:** Starting a run sends `StartGenerationRequest` to `POST /sessions/{id}/start`
 > (SSE). User picks sections, optional instruction, and approval policy before streaming begins.
+>
+> **Updated after the BE remediation:** the catalog comes from `GET /sections` (no more
+> hardcoded mirror), the default policy is **balanced** (user decision), and the empty-
+> sections rejection is a 400.
 
-**Docs to read:** `plans/BACKEND_CONTRACT.md` (section catalog, provider preflight),
-`fiscalflow-api/app/domain/sections.yaml`.
+**Docs to read:** `plans/UI_FLOW.md` (Phase C), BE `GET /sections`.
 
 ## Goal
 
-**Composer card**: section checkboxes (ordered), instruction, approval policy, provider
-readiness gate, and **Start generation** — disabled until databook is `ready` **and** LLM
-provider key is present on the server.
+**Composer card** on the run screen: section checkboxes, instruction textarea, approval
+policy, and **Start generation** — disabled until databook is `ready`.
 
-## Dependencies: task 02, task 04, task 05.
+## Dependencies: task 04, task 05.
 
 ## Scope
 
-**In:** `src/components/run/RunComposer.tsx`; `src/config/sections.ts`; `src/hooks/useProviderReadiness.ts`;
-`useStartRun` wiring (delegates SSE to parent).
+**In:** `src/components/run/RunComposer.tsx`; `src/hooks/useSectionCatalog.ts` (fetches
+`GET /sections`); integration hook `useStartRun` (calls task 03 SSE — can stub handlers
+until task 07).
 
-**Out:** Pipeline rail (task 07); Settings page UI (task 13) — but preflight uses same API.
+**Out:** Pipeline rail rendering (task 07); full workspace (task 10).
+
+## Section catalog — `GET /sections`
+
+```typescript
+{ sections: { id: string; title: string; order: number | null; required_structure: string[] }[] }
+```
+
+Live catalog today: `business_overview` (order 1) + `quality_of_earnings` (order 3).
+`order` values are **sparse by design** (they track the staged DD-Agent chapter numbers) —
+sort by `order`, never assume continuity.
 
 ## StartGenerationRequest fields
 
 ```typescript
 {
-  selected_sections: string[];      // min 1; sorted by catalog order when sent
-  document_ref?: string;
-  instruction?: string;
-  approval_policy?: "thorough" | "balanced";
-  provider_override?: string | null;  // optional per-run override (advanced)
+  selected_sections: string[];      // min 1 — BE rejects empty with HTTP 400 (not 422)
+  document_ref?: string;            // required in practice — from task 05
+  instruction?: string;             // optional user guidance (seeds instruction_history)
+  approval_policy?: "thorough" | "balanced";   // BE presets (§6.6); UI default "balanced"
+  provider_override?: string | null; // per-run provider select — build it here (small
+                                     // dropdown fed by GET /settings/providers, task 13
+                                     // owns the settings screen) or drop the field
 }
 ```
 
-## Section catalog (`src/config/sections.ts`)
-
-Copy from `fiscalflow-api/app/domain/sections.yaml` at implementation time:
-
-| id | title | order |
-|---|---|---|
-| `business_overview` | Business Overview | 1 |
-| `quality_of_earnings` | Quality of Earnings | 3 |
-
-- Sort UI by `order`; default selection: `["quality_of_earnings"]` only (faster MVP test).
-- Ids must match BE exactly — unknown id → 400 on start.
-- Add comment: re-sync when BE adds sections.
-
-## Provider preflight (required)
-
-On mount + when Settings may have changed:
-
-1. `getProviderSettings()` from task 02.
-2. `isProviderReady(settings)` → false if no provider or `key_present === false`.
-3. Show inline warning: "No LLM API key on server for {provider}. Set env var on API host or
-   pick another provider in Settings." Link to `/settings`.
-4. **Disable Start** when not ready (upload/ingest still works).
-
 ## UI elements
 
-- Section checkboxes + short descriptions from yaml `title`.
-- Instruction textarea.
-- Policy: **Thorough** vs **Balanced** (default `thorough`).
-- Start button + disabled reason tooltip (document not ready | provider not ready).
+- Section list with titles/descriptions from `GET /sections`.
+- Instruction: multiline, placeholder "Focus on revenue normalization…".
+- Policy: radio group, **default `balanced`**, with honest pause-cost copy so the choice
+  is informed:
+  - **Balanced** — ~5 approvals per section (the load-bearing gates only).
+  - **Thorough** — ~16 approvals per section (every step's plan + review), plus the
+    global gate; pair with task 08's bulk-approve. Power-user mode.
+- **Start** button: calls `streamGeneration(id, "start", body, handlers)`.
+- After start: composer collapses or locks; show "Running…" (task 07 takes over).
 
 ## Implementation notes
 
-- Pass `document_ref` from ingestion hook / local session.
-- HTTP 409 on start → toast (task 11).
-- HTTP 400 → show `detail` (bad section, empty list).
+- Validate at least one section selected client-side too.
+- Pass `document_ref` from `useDocumentIngestion` / local session.
+- On HTTP 409 (run already active): show toast + recover via task 11 flow.
+- Do not duplicate SSE handling here — delegate to parent `RunPage` state.
 
 ## Verification
 
-- Start disabled without ready document.
-- Start disabled when `key_present: false` for active provider.
-- With fixture + configured Z.ai key: Start opens SSE.
+- Start disabled when document not ready.
+- With ready document + API key configured: Start opens SSE stream (console log events).
+- Section catalog renders exactly what `GET /sections` returns (no hardcoded ids).
 
 ## Integration check
 
-BE rejects empty `selected_sections` with 400.
+BE rejects empty `selected_sections` with **400**; unknown section id → 400.
 
 ## Definition of done
 
-Composer + catalog + provider gate; Handoff updated.
+Composer UI + catalog hook + start wiring; Handoff updated.
 
 ---
 
