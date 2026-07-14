@@ -22,9 +22,144 @@ body {
     font-family: 'DM Sans', sans-serif;
     background: var(--bg);
     color: var(--text);
-    height: 100vh;
-    overflow: hidden;
+    min-height: 100vh;
 }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+code {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9em;
+    color: var(--info-blue);
+}
+
+/* ─── App shell (FDD workspace) ───────────── */
+.shell {
+    display: flex;
+    flex-direction: column;
+    min-height: 100vh;
+}
+.shell-topbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 52px;
+    padding: 0 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+.shell-brand {
+    font-size: 15px;
+    font-weight: 600;
+    letter-spacing: -0.3px;
+    color: var(--text);
+    text-decoration: none;
+}
+.shell-brand:hover { text-decoration: none; }
+.shell-brand span { color: var(--accent); }
+.shell-nav { display: flex; gap: 12px; align-items: center; }
+.shell-nav-link {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-dim);
+    text-decoration: none;
+    padding: 6px 10px;
+    border-radius: var(--radius);
+}
+.shell-nav-link:hover {
+    color: var(--text);
+    background: var(--surface2);
+    text-decoration: none;
+}
+.shell-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.home {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 48px 24px;
+    gap: 32px;
+}
+.home-hero {
+    text-align: center;
+    max-width: 420px;
+}
+.home-title {
+    font-size: 36px;
+    font-weight: 700;
+    letter-spacing: -0.8px;
+    margin-bottom: 10px;
+}
+.home-subtitle {
+    color: var(--text-dim);
+    font-size: 15px;
+    line-height: 1.5;
+    margin-bottom: 28px;
+}
+.home-actions { margin-bottom: 20px; }
+.home-legacy {
+    font-size: 12px;
+    color: var(--text-dim);
+}
+
+.btn-primary {
+    padding: 10px 22px;
+    border-radius: var(--radius);
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    font-family: 'DM Sans', sans-serif;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: opacity 0.15s;
+}
+.btn-primary:hover:not(:disabled) { opacity: 0.9; }
+.btn-primary:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.health-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-dim);
+}
+.health-dot__indicator {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-dim);
+}
+.health-dot--checking .health-dot__indicator { background: var(--warn-amber); }
+.health-dot--ok .health-dot__indicator { background: var(--success); }
+.health-dot--down .health-dot__indicator { background: var(--error-red); }
+
+.page-stub {
+    padding: 40px 28px;
+    max-width: 640px;
+}
+.page-stub h1 {
+    font-size: 22px;
+    font-weight: 600;
+    margin-bottom: 10px;
+}
+.page-stub p {
+    color: var(--text-dim);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+/* Legacy audit grid — scoped; keeps overflow locked for that screen only */
 .app {
     display: grid;
     grid-template-columns: 320px 1fr;
@@ -32,6 +167,7 @@ body {
     height: 100vh;
     gap: 1px;
     background: var(--border);
+    overflow: hidden;
 }
 
 /* ─── Top Bar ────────────────────────────── */

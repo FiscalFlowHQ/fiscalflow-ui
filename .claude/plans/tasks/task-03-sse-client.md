@@ -84,8 +84,49 @@ SSE parser + `streamGeneration`/`streamResume` helpers; tests; Handoff notes.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/types/sse.ts` — `SseEvent`, `SseHandlers`, `GenerationStreamPath`, `isTerminalSseEvent`.
+- `src/api/sse.ts` — line-buffered SSE parser + `streamGeneration` /
+  `streamStart` / `streamResume` / `streamContinue`; `parseSseFixture` / `decodeSseEvent`
+  for offline replay.
+- Auth via `getAuthHeaders()`; non-2xx → `ApiError` via shared `ensureOk` (http.ts).
+- Stops reading after terminal `interrupt` | `done` | `error` (interrupt always ends the
+  stream; next interaction is a **new** `resume`/`continue` POST).
+- `AbortSignal` supported (cancel / unmount).
+- Tests: `src/api/sse.test.ts` — fixture replay, plain+JSON tokens, HTTP 409, abort.
+- `npm test` 34 green; `npm run build` green.
+
+### Token / interrupt tolerance (BE drift)
+| Event | UI normalized shape | Live BE today |
+|---|---|---|
+| `token` | `{ text, node, namespace }` | **Plain string** in `data` (`streaming.py` yields `message.content`) |
+| `interrupt` | envelope always has `interrupt_id` (may be `""`) | No `interrupt_id` on TypedDict yet |
+| `continue` | `streamContinue()` wired | **Route missing** on live BE — task 11 blocked until BE adds it |
+
+Parser accepts both token forms so task 07/10 work against live OR remediated BE.
+
+### Usage for later tasks
+```ts
+await streamStart(threadId, body, {
+  onEvent(ev) {
+    if (ev.type === "step") { /* rail */ }
+    if (ev.type === "token") { /* append ev.text */ }
+    if (ev.type === "interrupt") { /* HITL: keep ev.interruptId + ev.envelope */ }
+  },
+});
+// later:
+await streamResume(threadId, { action: "approve", interrupt_id }, handlers);
+```
+
+No Last-Event-ID / stream re-attach. Mid-stream abort cancels the run server-side;
+recovery is `POST .../continue` once BE ships it.
+
+### Manual check
+Drive with BE up + `scripts/sse_client.py` first, then call `streamStart` from a temporary
+dev button / console against the same session flow.

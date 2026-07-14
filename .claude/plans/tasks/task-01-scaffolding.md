@@ -104,8 +104,35 @@ Route skeleton + env config + AppShell + health indicator; tracker + Handoff upd
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- Route skeleton under `AppShell`: `/` → `HomePage`, `/run/:threadId` → `RunPage` stub,
+  `/settings` → `SettingsPage` stub. Legacy audit kept at `/upload` + `/review/:auditId`
+  (still compiles; dead `/api/audits` client untouched).
+- `src/config/env.ts`: `config`, `apiUrl()`, `getAuthHeaders()` for task 02.
+- Vite proxy: `/sessions`, `/documents`, `/health`, `/settings`, `/sections` (+ `/api`) → `:8000`.
+- `.env.example` documents `VITE_API_BASE_URL` / `VITE_API_TOKEN`.
+- Base shell CSS: `:root` tokens kept; `body { overflow: hidden }` removed; overflow locked only on legacy `.app` grid.
+- Deps: `react-markdown`; Vitest + RTL + jest-dom + user-event + jsdom + msw.
+- Scripts: `npm test` (`vitest run`), `npm run test:watch`.
+- Smoke tests in `src/test/App.test.tsx` (routes + health ok/offline + config defaults) —
+  all 6 green; `npm run build` green.
+
+### Interfaces for next tasks
+- `getAuthHeaders()` / `apiUrl()` — REST client (task 02) should use these exclusively.
+- Empty `src/hooks/`, `src/stores/` reserved; types stay in `src/types.ts` until task 02 splits `src/types/`.
+- Home “New FDD run” is intentionally disabled until task 04 creates sessions.
+
+### CORS / env
+- Default `VITE_API_BASE_URL=""` → same-origin proxy (no CORS). Direct connect from `:5173`
+  still needs BE `FISCALFLOW_CORS_ORIGINS` to include `http://localhost:5173` (BE default is
+  only `http://localhost:1420`).
+
+### Manual check
+- With API up: HomePage health dot goes green via `GET /health` through the proxy.
+- Without API: red “Backend offline” (covered by MSW error test).

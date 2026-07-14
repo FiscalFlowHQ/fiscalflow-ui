@@ -38,9 +38,9 @@ run workspace under `/run/:threadId`.
 
 | # | Task | Depends on | BE ready | Status | Date | Notes |
 |---|---|---|---|---|---|---|
-| 01 | [Scaffolding & app shell](task-01-scaffolding.md) | — | 01+ | todo | | |
-| 02 | [Types & REST API client](task-02-api-client.md) | 01 | 03, 09 | todo | | |
-| 03 | [SSE streaming client](task-03-sse-client.md) | 02 | 08 | todo | | |
+| 01 | [Scaffolding & app shell](task-01-scaffolding.md) | — | 01+ | done | 2026-07-14 | Routes, env, AppShell, Vitest/RTL/msw, proxy, health dot |
+| 02 | [Types & REST API client](task-02-api-client.md) | 01 | 03, 09 | done | 2026-07-14 | fiscalflow.ts + types/api; ApiError; MSW tests; BE drift noted |
+| 03 | [SSE streaming client](task-03-sse-client.md) | 02 | 08 | done | 2026-07-14 | sse.ts + types; start/resume/continue; fixture tests; token drift noted |
 | 04 | [Session home & persistence](task-04-sessions.md) | 02 | 03 | todo | | |
 | 05 | [Databook upload & ingestion](task-05-databook.md) | 02, 04 | 09 | todo | | |
 | 06 | [Run composer](task-06-run-composer.md) | 04, 05 | 08 | todo | | |
