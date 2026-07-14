@@ -145,12 +145,19 @@ export function useDocumentIngestion(
         setDocumentRef(document_ref);
         onDocumentRefRef.current?.(document_ref);
       } catch (err) {
-        const message =
+        let message =
           err instanceof ApiError
             ? err.detail
             : err instanceof Error
               ? err.message
               : "Upload failed";
+        if (err instanceof ApiError) {
+          if (err.status === 413) {
+            message = "File exceeds the size limit.";
+          } else if (err.status === 503) {
+            message = "Backend busy — retry upload in a moment.";
+          }
+        }
         setError(message);
         setStatus("failed");
         onFailedRef.current?.(message);

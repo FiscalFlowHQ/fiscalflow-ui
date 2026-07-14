@@ -92,8 +92,34 @@ Recovery + cancel + error UX; Handoff documents any remaining lifecycle gaps.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/hooks/useSessionReconnect.ts` — `classifySessionReconnect` + `fetchReconnectSnapshot` +
+  `continueFromCheckpoint()` (`POST /continue` SSE).
+- `useRunOrchestrator` — new phase **`needs_continue`** when `state.next` is non-empty and no
+  interrupt; Cancel wired (`confirm` → abort SSE → `cancelRun`); SSE `error` → ErrorBanner +
+  toast; offline sticky banner; start **409** re-runs reconnect assessment.
+- `ErrorBanner` + `Toast`/`ToastProvider` (AppShell); upload **413/503** copy in
+  `useDocumentIngestion`.
+- `useHitlResume.abort()` + aborted signal; 409 after cancel surfaces
+  "run was cancelled…" when `run_status === cancelled`.
+- Tests: continue SSE, continue 404, needs_continue, cancel paused run (93 total green).
+
+### Poll / recovery notes
+- Interrupt present → `paused` (no `/continue`).
+- `next.length > 0` + non-terminal → **`needs_continue`** banner CTA.
+- Active status + empty `next` → **`server_running`** 4s poll (task 10).
+- Continue opens a **new** SSE body with the same fan-out as start/resume.
+
+### Remaining lifecycle gaps
+- **Live `fiscalflow-api` has no `POST /continue` yet** (only start/resume/cancel in
+  `generation.py`). UI targets the remediated contract; 404 → banner explains gap and falls
+  back to `server_running` messaging. Ship BE continue before acceptance.
+- Live cancel response may omit `was_running` — client already normalizes.
+- No global offline queue; sticky banner + reconnect assessment only.
+- Cancel uses `window.confirm` — can upgrade to a proper modal later.

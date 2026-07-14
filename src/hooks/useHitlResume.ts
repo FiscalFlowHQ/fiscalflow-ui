@@ -40,6 +40,8 @@ export type UseHitlResumeResult = {
   clearStack: () => void;
   clearResumeError: () => void;
   resume: (request: ResumeRequest, opts?: ResumeOptions) => Promise<boolean>;
+  /** Abort an in-flight resume SSE (cancel / unmount). */
+  abort: () => void;
 };
 
 export function useHitlResume(options: UseHitlResumeOptions): UseHitlResumeResult {
@@ -52,6 +54,7 @@ export function useHitlResume(options: UseHitlResumeOptions): UseHitlResumeResul
   const [bulkApprovePlans, setBulkApprovePlansState] = useState(false);
 
   const inFlightId = useRef<string | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const bulkRef = useRef(bulkApprovePlans);
   bulkRef.current = bulkApprovePlans;
 
@@ -89,14 +92,22 @@ export function useHitlResume(options: UseHitlResumeOptions): UseHitlResumeResul
       setResuming(true);
       setResumeError(null);
 
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       try {
         onBeginStreamRef.current?.();
-        await streamResume(threadId, body, {
-          onEvent: (ev) => {
-            onStreamEventRef.current?.(ev);
-            onEventRef.current?.(ev);
+        await streamResume(
+          threadId,
+          body,
+          {
+            onEvent: (ev) => {
+              onStreamEventRef.current?.(ev);
+              onEventRef.current?.(ev);
+            },
           },
-        });
+          controller.signal
+        );
 
         setStack((prev) =>
           prev.filter((e) => {
@@ -121,9 +132,23 @@ export function useHitlResume(options: UseHitlResumeOptions): UseHitlResumeResul
 
         return true;
       } catch (err) {
+        if (controller.signal.aborted) {
+          return false;
+        }
         if (err instanceof ApiError && err.status === 409) {
           try {
             const state = await getSessionState(threadId);
+            const statusHint =
+              typeof state.values?.run_status === "string"
+                ? state.values.run_status
+                : null;
+            if (statusHint === "cancelled") {
+              setStack([]);
+              setResumeError(
+                "This run was cancelled and cannot be resumed. Start a new generation from the composer."
+              );
+              return false;
+            }
             if (state.interrupt) {
               setStack([state.interrupt]);
               setResumeError(
@@ -154,6 +179,7 @@ export function useHitlResume(options: UseHitlResumeOptions): UseHitlResumeResul
         }
         return false;
       } finally {
+        if (abortRef.current === controller) abortRef.current = null;
         if (inFlightId.current === id) inFlightId.current = null;
         setResuming(false);
       }
@@ -162,6 +188,13 @@ export function useHitlResume(options: UseHitlResumeOptions): UseHitlResumeResul
   );
 
   resumeFn.current = resume;
+
+  const abort = useCallback(() => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    inFlightId.current = null;
+    setResuming(false);
+  }, []);
 
   const pushInterrupt = useCallback((envelope: InterruptEnvelope) => {
     const key = envelopeKey(envelope);
@@ -206,5 +239,6 @@ export function useHitlResume(options: UseHitlResumeOptions): UseHitlResumeResul
     clearStack,
     clearResumeError: () => setResumeError(null),
     resume,
+    abort,
   };
 }

@@ -117,7 +117,7 @@ describe("useDocumentIngestion", () => {
     });
 
     expect(result.current.phase).toBe("failed");
-    expect(result.current.error).toMatch(/too large/i);
+    expect(result.current.error).toMatch(/size limit/i);
   });
 
   it("stops polling on unmount", async () => {

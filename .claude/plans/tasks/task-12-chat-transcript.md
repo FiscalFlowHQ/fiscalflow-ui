@@ -89,8 +89,37 @@ Chat panel with composer wired to `/instruction`; inline cards; Handoff updated.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/hooks/useTranscript.ts` — chronological entries; token batching by `node`;
+  interrupt dedupe; decisions; `sessionStorage` key `fiscalflow.transcript.v1.{threadId}`;
+  clear-on-new-run confirm; plain-text export helper.
+- `src/components/chat/ChatPanel.tsx` + `Composer.tsx` — thread UI with inline
+  `InterruptCard` for the current pause; answered interrupts collapse to a decision line;
+  soft truncate last 250; composer hint: applies from the **next** planning step.
+- `useRunOrchestrator` — SSE fan-out to transcript; databook-ready / run-started system
+  lines; HITL `history` → decisions (+ compact system for bulk auto-approve); seed pause
+  interrupts on reconnect; `sendInstruction` / `exportTranscript` APIs.
+- `RunPage` — Chat in the right sidebar under databook + run composer; **removed**
+  duplicate `InterruptStack` (cards live in the thread).
+- CSS: `.chat-*` in `run-workspace.css`.
+- Tests: `useTranscript.test.ts` (batching, persist, clear confirm, export);
+  orchestrator `sendInstruction` success + 404 messaging. **99** tests green; build green.
+
+### BE drift
+- Live API may still lack `POST /sessions/{id}/instruction` (start-time `instruction` only).
+  UI keeps the composer enabled and surfaces a clear 404 toast / composer error —
+  does not pretend the instruction was stored.
+- Instruction is **not** free-form LLM chat — it appends to `instruction_history` /
+  feedback for subsequent planner steps only.
+
+### For task 13+
+- Settings remains independent; no chat coupling.
+- Task 15 polish may want true virtualization (`react-window`) if transcripts grow past
+  the soft 250-entry window, and richer reject-reason mirroring on decision lines if
+  HITL history starts carrying `reason`.

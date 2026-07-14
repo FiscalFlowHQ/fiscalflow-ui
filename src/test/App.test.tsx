@@ -70,10 +70,14 @@ describe("app shell routes", () => {
     });
   });
 
-  it("renders RunPage stub for a thread id", async () => {
+  it("renders RunPage workspace for a thread id", async () => {
     renderAt("/run/thread-abc");
-    expect(screen.getByRole("heading", { name: /run workspace/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /FDD run/i })).toBeInTheDocument();
     expect(screen.getByText("thread-abc")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Cancel/i })).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.getByRole("navigation", { name: /breadcrumb/i })).toBeInTheDocument();
+    });
   });
 
   it("renders Settings stub", () => {

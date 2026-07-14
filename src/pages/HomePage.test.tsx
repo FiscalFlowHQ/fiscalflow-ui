@@ -79,7 +79,7 @@ describe("HomePage sessions", () => {
     await user.click(screen.getByRole("button", { name: /new fdd run/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: /run workspace/i })).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: /FDD run/i })).toBeInTheDocument();
       expect(screen.getByText("new-thread-1")).toBeInTheDocument();
     });
 
