@@ -3,9 +3,12 @@ import AppShell from "./layouts/AppShell";
 import HomePage from "./pages/HomePage";
 import RunPage from "./pages/RunPage";
 import SettingsPage from "./pages/SettingsPage";
-import UploadPage from "./pages/UploadPage";
-import ReviewPage from "./pages/ReviewPage";
 
+/**
+ * FiscalFlow FDD workspace routes.
+ * Legacy csv-fixer audit pages (`/upload`, `/review/:id`) are intentionally not served —
+ * they called `/api/audits/*`, which exists in neither fiscalflow-ui nor fiscalflow-api.
+ */
 export default function App() {
   return (
     <Routes>
@@ -14,9 +17,8 @@ export default function App() {
         <Route path="/run/:threadId" element={<RunPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Route>
-      {/* Legacy audit flow — parked until task 15; keep compiling */}
-      <Route path="/upload" element={<UploadPage />} />
-      <Route path="/review/:auditId" element={<ReviewPage />} />
+      <Route path="/upload" element={<Navigate to="/" replace />} />
+      <Route path="/review/*" element={<Navigate to="/" replace />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

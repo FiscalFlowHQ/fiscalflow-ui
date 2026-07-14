@@ -6,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import App from "../App";
 import { config, getAuthHeaders } from "../config/env";
 import { clearSessionsForTests } from "../stores/sessionStore";
+import { clearSettingsForTests } from "../stores/settingsStore";
 
 const server = setupServer(
   http.get("/health", () => HttpResponse.json({ status: "ok" })),
@@ -40,9 +41,13 @@ beforeAll(() => server.listen({ onUnhandledRequest: "error" }));
 afterEach(() => {
   server.resetHandlers();
   clearSessionsForTests();
+  clearSettingsForTests();
 });
 afterAll(() => server.close());
-beforeEach(() => clearSessionsForTests());
+beforeEach(() => {
+  clearSessionsForTests();
+  clearSettingsForTests();
+});
 
 function renderAt(path: string) {
   return render(
@@ -80,14 +85,19 @@ describe("app shell routes", () => {
     });
   });
 
-  it("renders Settings stub", () => {
+  it("renders Settings page", async () => {
     renderAt("/settings");
-    expect(screen.getByRole("heading", { name: /settings/i })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: /^settings$/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: /api connection/i })).toBeInTheDocument();
+    });
   });
 
-  it("keeps legacy upload route compiling", () => {
+  it("redirects parked legacy audit routes to home", async () => {
     renderAt("/upload");
-    expect(document.body.textContent).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "FiscalFlow" })).toBeInTheDocument();
+    });
   });
 });
 

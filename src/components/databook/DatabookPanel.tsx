@@ -1,8 +1,11 @@
 import { useCallback, useRef, useState } from "react";
 import {
   ACCEPTED_DATABOOK_EXTENSIONS,
+  INGESTION_POLL_MS,
   useDocumentIngestion,
 } from "../../hooks/useDocumentIngestion";
+import { isTauri, pickDatabookFile } from "../../lib/tauri";
+import { loadSettings } from "../../stores/settingsStore";
 
 const ACCEPT_ATTR = ACCEPTED_DATABOOK_EXTENSIONS.join(",");
 
@@ -64,7 +67,10 @@ export default function DatabookPanel({
     onDocumentRef,
     onReady: (ref) => onReadyChange?.(true, ref),
     onFailed: () => onReadyChange?.(false, null),
-    pollIntervalMs,
+    pollIntervalMs:
+      pollIntervalMs ??
+      loadSettings().documentPollIntervalMs ??
+      INGESTION_POLL_MS,
   });
 
   const onFiles = useCallback(
@@ -74,6 +80,20 @@ export default function DatabookPanel({
     },
     [ingestion]
   );
+
+  const chooseFile = useCallback(async () => {
+    if (ingestion.uploading) return;
+    if (isTauri()) {
+      try {
+        const file = await pickDatabookFile();
+        if (file) void ingestion.upload(file);
+      } catch (err) {
+        console.error("[fiscalflow] native file picker failed", err);
+      }
+      return;
+    }
+    inputRef.current?.click();
+  }, [ingestion]);
 
   const kinds = kindsForStatus(ingestion.status);
   const showStepper = Boolean(ingestion.status) || ingestion.uploading;
@@ -119,20 +139,24 @@ export default function DatabookPanel({
           type="button"
           className="btn-secondary"
           disabled={ingestion.uploading}
-          onClick={() => inputRef.current?.click()}
+          onClick={() => {
+            void chooseFile();
+          }}
         >
           {ingestion.ready || failed ? "Upload another" : "Choose file"}
         </button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept={ACCEPT_ATTR}
-          hidden
-          onChange={(e) => {
-            onFiles(e.target.files);
-            e.target.value = "";
-          }}
-        />
+        {!isTauri() && (
+          <input
+            ref={inputRef}
+            type="file"
+            accept={ACCEPT_ATTR}
+            hidden
+            onChange={(e) => {
+              onFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
+        )}
       </div>
 
       {(ingestion.fileName || ingestion.documentRef) && (

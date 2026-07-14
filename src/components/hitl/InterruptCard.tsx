@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { InterruptEnvelope, ResumeRequest } from "../../types/api";
 import MarkdownView from "../artifacts/MarkdownView";
 import {
@@ -37,9 +37,16 @@ export default function InterruptCard({
   const [reason, setReason] = useState("");
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [localError, setLocalError] = useState<string | null>(null);
+  const primaryRef = useRef<HTMLButtonElement>(null);
 
   const title = hitlTitle(envelope);
   const step = stepLabel(envelope.step_id);
+
+  useEffect(() => {
+    // Keyboard: land focus on the primary approve (or answer) action when a new pause opens.
+    const id = window.setTimeout(() => primaryRef.current?.focus(), 0);
+    return () => window.clearTimeout(id);
+  }, [envelope.interrupt_id, envelope.phase, envelope.step_id, envelope.section_id]);
 
   function submit(action: ResumeRequest["action"]) {
     setLocalError(null);
@@ -264,6 +271,7 @@ export default function InterruptCard({
 
         {canAct(envelope, "answer") && (
           <button
+            ref={!canAct(envelope, "approve") ? primaryRef : undefined}
             type="button"
             className="btn-primary"
             disabled={busy}
@@ -275,6 +283,7 @@ export default function InterruptCard({
 
         {canAct(envelope, "approve") && (
           <button
+            ref={primaryRef}
             type="button"
             className="btn-primary"
             disabled={busy}

@@ -3,7 +3,7 @@
  * SSE: see `./sse` (`streamStart` / `streamResume` / `streamContinue`).
  */
 
-import { requestBlob, requestJson } from "./http";
+import { ApiError, ensureOk, requestBlob, requestJson } from "./http";
 import type {
   CancelResponse,
   DocumentFormat,
@@ -114,4 +114,29 @@ export function setProviderSettings(
 
 export function checkHealth(): Promise<HealthResponse> {
   return requestJson<HealthResponse>("/health");
+}
+
+/**
+ * Probe `/health` with optional one-shot URL/token (Settings "Test connection").
+ * Does not mutate the settings store.
+ */
+export async function probeHealth(opts?: {
+  apiBaseUrl?: string;
+  apiToken?: string;
+}): Promise<HealthResponse> {
+  const base = (opts?.apiBaseUrl ?? "").trim().replace(/\/$/, "");
+  const url = `${base}/health`;
+  const headers = new Headers();
+  const token = (opts?.apiToken ?? "").trim();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  let res: Response;
+  try {
+    res = await fetch(url || "/health", { headers });
+  } catch (err) {
+    const message =
+      err instanceof Error ? err.message : "Failed to reach the API";
+    throw new ApiError(0, message, err);
+  }
+  await ensureOk(res);
+  return (await res.json()) as HealthResponse;
 }

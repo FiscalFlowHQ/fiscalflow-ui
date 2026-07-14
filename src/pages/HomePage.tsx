@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import { checkHealth } from "../api/fiscalflow";
 import { useSessionList } from "../hooks/useSessionList";
 import { runStatusBadge } from "../lib/runStatusBadge";
@@ -179,10 +179,6 @@ export default function HomePage() {
           </ul>
         )}
       </section>
-
-      <p className="home-legacy">
-        <Link to="/upload">Legacy Excel auditor</Link>
-      </p>
     </div>
   );
 }

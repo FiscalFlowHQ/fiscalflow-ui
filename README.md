@@ -1,13 +1,26 @@
 # FiscalFlow UI
 
-React frontend for the FiscalFlow Excel audit platform. Upload a workbook, run the audit via the API, and review/fix spreadsheet errors in an interactive UI ported from [csv-fixer](https://github.com/FiscalFlowHQ/csv-fixer) `review_ui.html`.
+React + **Tauri 2** desktop client for FiscalFlow. Upload Excel databooks, run the
+SSE-streamed FDD pipeline against [fiscalflow-api](https://github.com/FiscalFlowHQ/fiscalflow-api),
+review human-in-the-loop pauses, and **export** the assembled report
+(`GET /sessions/{id}/document?format=md|pptx|pdf`).
 
-**Companion backend:** [fiscalflow-api](https://github.com/FiscalFlowHQ/fiscalflow-api)
+```
+┌─────────────┐     REST + SSE      ┌──────────────────┐
+│ fiscalflow  │ ──────────────────► │  fiscalflow-api  │
+│ ui (Vite /  │   localhost:8000    │  FastAPI+LangGraph│
+│ Tauri shell)│ ◄────────────────── │  checkpointer     │
+└─────────────┘                     └──────────────────┘
+        │                                      │
+        │ localStorage sessions / settings     │ Excel → ingest
+        ▼                                      ▼
+   /run/:threadId                      outputs/<thread>/…
+   Databook · Pipeline · Artifacts     report.md / .pptx / .pdf
+   Chat · HITL · Export
+```
 
-## What it does
-
-1. **Upload page** (`/`) — drag-and-drop or pick an `.xlsx` file; sends it to the API for auditing
-2. **Review page** (`/review/:auditId`) — error sidebar, sheet viewer, formula fix editor, dependency chain, undo/download
+The csv-fixer **audit review** flow is **not** part of this app (no `/api/audits` in either
+repo). Legacy pages are parked under `src/legacy/`; `/upload` and `/review/*` redirect home.
 
 ## Stack
 
@@ -15,34 +28,50 @@ React frontend for the FiscalFlow Excel audit platform. Upload a workbook, run t
 |-------|------------|
 | UI | React 19 + TypeScript |
 | Build | Vite 6 |
+| Desktop | Tauri 2 (`src-tauri/`) |
 | Routing | react-router-dom |
-| Styling | Ported CSS from csv-fixer (dark theme) |
-| API | `fetch` → fiscalflow-api (dev proxy on `/api`) |
-
-Desktop packaging via **Tauri** is planned; this repo is structured as a standard Vite SPA so `src-tauri/` can be added later without rewriting the UI.
+| API | `fetch` + SSE → fiscalflow-api |
 
 ## Requirements
 
+### Web / UI
+
 - Node.js 18+ and npm
-- [fiscalflow-api](https://github.com/FiscalFlowHQ/fiscalflow-api) running on port **8000**
+- Sibling [fiscalflow-api](https://github.com/FiscalFlowHQ/fiscalflow-api) on port **8000**
+
+### Desktop (Tauri)
+
+- **Rust** 1.77.2+ (`rustup`)
+- macOS: Xcode Command Line Tools (`xcode-select --install`)
+- Windows / Linux: see [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/)
 
 ## Setup
 
 ```bash
 git clone https://github.com/FiscalFlowHQ/fiscalflow-ui.git
 cd fiscalflow-ui
-
 npm install
+cp .env.example .env   # optional overrides
 ```
 
-## Run (development)
+## Environment
+
+| Variable | Role |
+|----------|------|
+| `VITE_API_BASE_URL` | Empty = Vite proxy (browser) or Tauri’s runtime default `http://localhost:8000`. Release Tauri builds inject localhost:8000. |
+| `VITE_API_TOKEN` | Optional bearer; must match `FISCALFLOW_API_TOKEN` on the API |
+| Settings UI | Runtime overrides in `localStorage` key `fiscalflow.settings.v1` |
+
+API-side (not in this repo): `ZAI_API_KEY` / provider keys, `FISCALFLOW_CORS_ORIGINS`,
+`FISCALFLOW_API_TOKEN`.
+
+## Run — browser
 
 **Terminal 1 — API:**
 
 ```bash
 cd ../fiscalflow-api
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
+source .venv/bin/activate
 uvicorn app.main:app --reload --port 8000
 ```
 
@@ -52,80 +81,52 @@ uvicorn app.main:app --reload --port 8000
 npm run dev
 ```
 
-Open http://localhost:5173
+Open http://localhost:5173 — Vite proxies `/sessions`, `/documents`, `/settings`, `/sections`,
+`/health` to the API.
 
-In dev, Vite proxies `/api/*` to `http://localhost:8000` (see `vite.config.ts`).
+## Run — desktop
 
-## Build
+1. Start fiscalflow-api on **:8000** (no sidecar auto-start in MVP).
+2. `npm run tauri:dev`
+
+CORS example when the webview origin is not the API’s default:
 
 ```bash
-npm run build    # output in dist/
-npm run preview  # serve production build locally
+export FISCALFLOW_CORS_ORIGINS="http://localhost:5173,http://localhost:1420,tauri://localhost,http://tauri.localhost,https://tauri.localhost"
 ```
 
-## Project structure
+## Build & test
 
-```
-fiscalflow-ui/
-├── src/
-│   ├── pages/
-│   │   ├── UploadPage.tsx     # xlsx upload → POST /api/audits
-│   │   └── ReviewPage.tsx     # full review workflow
-│   ├── components/
-│   │   ├── TopBar.tsx
-│   │   ├── SheetViewer.tsx
-│   │   ├── SheetTabsBar.tsx
-│   │   ├── Sidebar/           # error list, filters, grouping
-│   │   └── DetailPanel/       # details, fix editor, dep chain
-│   ├── api/client.ts          # typed API wrappers
-│   ├── types.ts
-│   ├── utils/badges.ts
-│   └── styles/global.css
-├── index.html
-├── vite.config.ts
-└── package.json
+```bash
+npm test
+npm run build
+npm run tauri:build   # requires Rust; artifacts under src-tauri/target/release/bundle/
 ```
 
 ## Routes
 
-| Path | Page | Description |
-|------|------|-------------|
-| `/` | UploadPage | Select `.xlsx`, run audit, redirect on success |
-| `/review/:auditId` | ReviewPage | Error review and fix UI |
+| Path | Description |
+|------|-------------|
+| `/` | Session home — health check, New FDD run |
+| `/run/:threadId` | Run workspace |
+| `/settings` | API URL, token, LLM provider defaults |
+| `/upload`, `/review/*` | Redirect → `/` (legacy audit parked) |
 
-## API integration
+## Export
 
-All requests go through `src/api/client.ts`:
+After `run_status: completed`, the **Report** tab feature-detects formats from
+`values.metadata.artifacts` (`markdown` → Download Markdown, plus pptx/pdf when present).
+Downloads use **only** `GET /sessions/{id}/document?format=`. Server paths are never
+treated as browser-readable content.
 
-- `uploadAudit(file)` → `POST /api/audits`
-- `fetchErrors`, `fetchError`, `fetchSheetData`, `fetchProgress`
-- `applyFix`, `skipError`, `undoFix`, `saveReport`, `downloadUrl`
+## Fixture databook
 
-The `auditId` from the upload response is used in the URL and all subsequent API calls.
-
-## Review UI features
-
-- Filter errors: All / Needs Fix / Suggested / Done
-- Group errors by root cause (expandable)
-- Infinite scroll (50 errors per page)
-- Sheet tabs with search and error indicators
-- Cell grid with target highlighting
-- Formula editor with suggested fixes
-- Undo, download fixed workbook, save report
-
-## Future: Tauri desktop
-
-This repo is the intended home for the desktop app:
-
-- Add `src-tauri/` when ready
-- Introduce `VITE_API_BASE_URL` for non-proxy API access
-- Optional native file dialogs and sidecar for fiscalflow-api
-
-No Tauri/Electron code is included yet.
+Use `fiscalflow-api/tests/fixtures/sample_databook.xlsx` for upload/ingest smoke tests.
 
 ## Status
 
-**v0.1 — development / internal use.** Pairs with fiscalflow-api for local Excel audit workflows.
+**v0.1 — MVP.** Acceptance checklist lives in `.claude/plans/tasks/task-15-acceptance.md`
+Handoff notes.
 
 ## License
 

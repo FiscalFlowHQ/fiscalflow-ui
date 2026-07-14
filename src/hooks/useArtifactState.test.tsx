@@ -2,7 +2,7 @@ import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
-import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { renderHook } from "@testing-library/react";
 import ArtifactPanel from "../components/artifacts/ArtifactPanel";
 import {
@@ -109,6 +109,52 @@ describe("useArtifactState", () => {
       expect(result.current.reportMarkdown).toContain("Assembled FDD");
     });
     expect(result.current.runStatus).toBe("completed");
+  });
+
+  it("exposes export formats from metadata.artifacts and downloads md", async () => {
+    server.use(
+      http.get("/sessions/t-export/state", () =>
+        HttpResponse.json({
+          values: {
+            run_status: "completed",
+            metadata: {
+              artifacts: {
+                markdown: "/outputs/t/report.md",
+                pptx: "/outputs/t/report.pptx",
+              },
+            },
+          },
+          next: [],
+          interrupt: null,
+          section_state: null,
+        })
+      ),
+      http.get("/sessions/t-export/document", ({ request }) => {
+        const url = new URL(request.url);
+        expect(url.searchParams.get("format")).toBe("md");
+        return new HttpResponse("# Exported", {
+          headers: { "Content-Type": "text/markdown" },
+        });
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useArtifactState({ threadId: "t-export", pollMs: 0 })
+    );
+
+    await act(async () => {
+      await result.current.refreshState();
+    });
+    expect(result.current.exportFormats).toEqual(["md", "pptx"]);
+
+    const click = vi.fn();
+    HTMLAnchorElement.prototype.click = click;
+
+    await act(async () => {
+      await result.current.downloadExport("md");
+    });
+    expect(result.current.reportMarkdown).toBe("# Exported");
+    expect(click).toHaveBeenCalled();
   });
 });
 

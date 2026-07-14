@@ -8,9 +8,15 @@ import {
   normalizeSectionState,
   liveSectionId,
 } from "../components/artifacts/artifactModel";
+import { triggerBlobDownload } from "../lib/downloadBlob";
+import {
+  availableExportFormats,
+  exportFilename,
+} from "../lib/exportFormats";
 import type {
   CompletedSection,
   CrossSectionReview,
+  DocumentFormat,
   Finding,
   InterruptEnvelope,
   ReportValues,
@@ -43,6 +49,12 @@ export type UseArtifactStateResult = {
   reportError: string | null;
   stateError: string | null;
   runStatus: string | null;
+  /** Formats present in `metadata.artifacts` (md / pptx / pdf). */
+  exportFormats: DocumentFormat[];
+  exportBusy: DocumentFormat | null;
+  exportError: string | null;
+  downloadExport: (format: DocumentFormat) => Promise<void>;
+  clearExportError: () => void;
   applyEvent: (ev: SseEvent) => void;
   seedFromInterrupt: (envelope: InterruptEnvelope) => void;
   refreshState: () => Promise<void>;
@@ -67,6 +79,9 @@ export function useArtifactState(options: UseArtifactStateOptions): UseArtifactS
   const [reportError, setReportError] = useState<string | null>(null);
   const [stateError, setStateError] = useState<string | null>(null);
   const [runStatus, setRunStatus] = useState<string | null>(null);
+  const [exportFormats, setExportFormats] = useState<DocumentFormat[]>([]);
+  const [exportBusy, setExportBusy] = useState<DocumentFormat | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [polling, setPolling] = useState(false);
 
   const pendingChunks = useRef<string[]>([]);
@@ -111,6 +126,7 @@ export function useArtifactState(options: UseArtifactStateOptions): UseArtifactS
       const status =
         typeof nextValues.run_status === "string" ? nextValues.run_status : null;
       setRunStatus(status);
+      setExportFormats(availableExportFormats(nextValues.metadata?.artifacts));
 
       // Rebuild Live from checkpoint draft when we have no token stream (reconnect).
       if (!liveBuiltFromTokens.current && typeof ss?.draft === "string" && ss.draft) {
@@ -162,6 +178,46 @@ export function useArtifactState(options: UseArtifactStateOptions): UseArtifactS
     }
   }, [threadId]);
 
+  const downloadExport = useCallback(
+    async (format: DocumentFormat) => {
+      if (exportBusy) return;
+      setExportBusy(format);
+      setExportError(null);
+      try {
+        const blob = await downloadDocument(threadId, format);
+        if (format === "md") {
+          const text = await blob.text();
+          setReportMarkdown(text);
+          triggerBlobDownload(
+            new Blob([text], { type: "text/markdown;charset=utf-8" }),
+            exportFilename(threadId, format)
+          );
+        } else {
+          triggerBlobDownload(blob, exportFilename(threadId, format));
+        }
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 404) {
+          setExportError(
+            `${format.toUpperCase()} is not available for this run (feature-detect from metadata.artifacts).`
+          );
+        } else if (err instanceof ApiError && err.status === 422) {
+          setExportError(err.detail || "Unknown export format.");
+        } else {
+          setExportError(
+            err instanceof ApiError
+              ? err.detail
+              : err instanceof Error
+                ? err.message
+                : "Export failed"
+          );
+        }
+      } finally {
+        setExportBusy(null);
+      }
+    },
+    [exportBusy, threadId]
+  );
+
   const reset = useCallback(() => {
     if (rafId.current != null) cancelAnimationFrame(rafId.current);
     rafId.current = null;
@@ -180,6 +236,9 @@ export function useArtifactState(options: UseArtifactStateOptions): UseArtifactS
     setReportError(null);
     setStateError(null);
     setRunStatus(null);
+    setExportFormats([]);
+    setExportBusy(null);
+    setExportError(null);
     setPolling(false);
   }, []);
 
@@ -240,7 +299,12 @@ export function useArtifactState(options: UseArtifactStateOptions): UseArtifactS
 
   // Auto-load report markdown when switching to Report tab if completed.
   useEffect(() => {
-    if (tab === "report" && runStatus === "completed" && reportMarkdown == null && !reportLoading) {
+    if (
+      tab === "report" &&
+      runStatus === "completed" &&
+      reportMarkdown == null &&
+      !reportLoading
+    ) {
       void loadReport();
     }
   }, [tab, runStatus, reportMarkdown, reportLoading, loadReport]);
@@ -262,6 +326,11 @@ export function useArtifactState(options: UseArtifactStateOptions): UseArtifactS
     reportError,
     stateError,
     runStatus,
+    exportFormats,
+    exportBusy,
+    exportError,
+    downloadExport,
+    clearExportError: () => setExportError(null),
     applyEvent,
     seedFromInterrupt,
     refreshState,

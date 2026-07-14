@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { UseArtifactStateResult } from "../../hooks/useArtifactState";
 import EvidencePanel from "./EvidencePanel";
+import ExportBar from "./ExportBar";
 import FindingsPanel from "./FindingsPanel";
 import LiveDraft from "./LiveDraft";
 import MarkdownView from "./MarkdownView";
@@ -43,6 +44,9 @@ export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
     }
     return groups;
   }, [artifacts.completedSections, artifacts.sectionState]);
+
+  const showExport =
+    artifacts.runStatus === "completed" || artifacts.exportFormats.length > 0;
 
   return (
     <section className="artifact-panel" aria-label="Artifacts">
@@ -103,8 +107,36 @@ export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
         )}
         {artifacts.tab === "report" && (
           <div className="artifact-report">
+            {showExport && (
+              <ExportBar
+                formats={artifacts.exportFormats}
+                busyFormat={artifacts.exportBusy}
+                error={artifacts.exportError}
+                awaitingArtifacts={
+                  artifacts.runStatus === "completed" &&
+                  artifacts.exportFormats.length === 0
+                }
+                onExport={(format) => {
+                  artifacts.clearExportError();
+                  void artifacts.downloadExport(format);
+                }}
+                onRefresh={() => {
+                  void artifacts.refreshState().then(() => {
+                    if (artifacts.runStatus === "completed") {
+                      void artifacts.loadReport();
+                    }
+                  });
+                }}
+              />
+            )}
+
             {artifacts.reportLoading && (
-              <p className="artifact-empty">Loading assembled markdown…</p>
+              <div className="skeleton-stack" aria-busy="true" aria-label="Loading report">
+                <div className="skeleton skeleton--line" />
+                <div className="skeleton skeleton--line" />
+                <div className="skeleton skeleton--line skeleton--short" />
+                <div className="skeleton skeleton--block" />
+              </div>
             )}
             {!artifacts.reportLoading && artifacts.reportError && (
               <p className="artifact-empty" role="alert">
@@ -123,11 +155,9 @@ export default function ArtifactPanel({ artifacts }: ArtifactPanelProps) {
               !artifacts.reportError &&
               !artifacts.reportMarkdown && (
                 <p className="artifact-empty">
-                  Assembled report loads via{" "}
-                  <code>GET /sessions/…/document?format=md</code> after{" "}
-                  <code>run_status: completed</code>. Paths in{" "}
-                  <code>final_document</code> / <code>metadata.artifacts</code> are
-                  not rendered.
+                  {artifacts.runStatus === "completed"
+                    ? "Markdown preview unavailable — use Export above when the API lists a markdown artifact."
+                    : "Assembled report appears here after the run completes. Export uses GET /sessions/…/document?format= — paths in metadata.artifacts are server filesystem locations, not content."}
                 </p>
               )}
           </div>

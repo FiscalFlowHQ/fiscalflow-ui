@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { getProviderSettings } from "../../api/fiscalflow";
 import { useSectionCatalog } from "../../hooks/useSectionCatalog";
-import type { ApprovalPolicyName, StartGenerationRequest } from "../../types/api";
+import type {
+  ApprovalPolicyName,
+  AvailableProvider,
+  StartGenerationRequest,
+} from "../../types/api";
 
 export type RunComposerProps = {
   databookReady: boolean;
@@ -27,16 +32,17 @@ export default function RunComposer({
   const [instruction, setInstruction] = useState("");
   const [policy, setPolicy] = useState<ApprovalPolicyName>("balanced");
   const [providerOverride, setProviderOverride] = useState<string>("");
-  const [providers, setProviders] = useState<
-    { provider: string; default_model: string; key_present: boolean }[]
-  >([]);
+  const [providers, setProviders] = useState<AvailableProvider[]>([]);
+  const [defaultProvider, setDefaultProvider] = useState<string | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     void getProviderSettings()
       .then((res) => {
-        if (!cancelled) setProviders(res.available_providers ?? []);
+        if (cancelled) return;
+        setProviders(res.available_providers ?? []);
+        setDefaultProvider(res.provider ?? null);
       })
       .catch(() => {
         /* optional — settings may be unset; Start still works without override */
@@ -45,6 +51,24 @@ export default function RunComposer({
       cancelled = true;
     };
   }, []);
+
+  const providerKeyWarning = useMemo(() => {
+    if (providers.length === 0) return null;
+    if (providers.every((p) => !p.key_present)) {
+      return "No LLM API keys are configured on the server. Set ZAI_API_KEY (or another provider key) on fiscalflow-api, then confirm in Settings.";
+    }
+    const effective =
+      providerOverride ||
+      defaultProvider ||
+      providers.find((p) => p.key_present)?.provider ||
+      null;
+    if (!effective) return null;
+    const meta = providers.find((p) => p.provider === effective);
+    if (meta && !meta.key_present) {
+      return `Provider “${effective}” is selected but its API key is missing on the server. Open Settings to pick another provider or fix the server env.`;
+    }
+    return null;
+  }, [providers, providerOverride, defaultProvider]);
 
   // Default-select all catalog sections when they first load.
   useEffect(() => {
@@ -218,6 +242,13 @@ export default function RunComposer({
             ))}
           </select>
         </label>
+      )}
+
+      {providerKeyWarning && (
+        <p className="run-composer__warn" role="status">
+          {providerKeyWarning}{" "}
+          <Link to="/settings">Open Settings</Link>
+        </p>
       )}
 
       {(validationError || startError) && (

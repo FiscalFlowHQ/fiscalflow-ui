@@ -9,8 +9,13 @@ const apiProxy = {
 
 export default defineConfig({
   plugins: [react()],
+  clearScreen: false,
   server: {
     port: 5173,
+    strictPort: true,
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
     proxy: {
       // Legacy audit client (dead API — keep compiling until task 15)
       "/api": apiProxy,
