@@ -83,8 +83,34 @@ Composer UI + catalog hook + start wiring; Handoff updated.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/hooks/useSectionCatalog.ts` — `GET /sections`, sparse `order` sort, no hardcoded ids.
+- `src/hooks/useStartRun.ts` — `streamStart` wrapper; phases idle→streaming→paused/done/error;
+  client empty-section check; HTTP 400/409 messaging; AbortSignal.
+- `src/components/run/RunComposer.tsx` — section checkboxes, instruction, balanced/thorough
+  policy copy, optional provider override from `GET /settings/providers`, Start gated on
+  databook ready + `document_ref`.
+- `RunPage` — composer + SSE preview log (forwards events for task 07); patches local
+  session run status on step/interrupt/done/error.
+- Tests: catalog/start hooks + composer (62 green); build green.
+
+### Contract for task 07+
+- Consume `useStartRun`/`onEvent` SSE buffer (or lift into a shared run store).
+- Composer locks once streaming; do not re-`start` until reset/error recovery.
+- Resume/HITL is task 08 — Start only opens the first stream.
+
+### BE drift
+- Live `fiscalflow-api` still **has no `GET /sections`** — composer shows a clear error +
+  Retry until the route exists. Catalog must stay API-driven (no hardcoded fallback list).
+- `/settings/providers` failure is soft (override dropdown omitted).
+
+### Manual QA
+- Ready databook + mocked or live `/sections` → Start posts
+  `{ selected_sections, document_ref, approval_policy: "balanced", instruction? }` and
+  SSE events appear in the Stream preview / console.

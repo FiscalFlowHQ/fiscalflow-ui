@@ -90,7 +90,8 @@ export interface InterruptEnvelope {
 export interface SectionCatalogItem {
   id: string;
   title: string;
-  order: number;
+  /** Sparse DD-Agent chapter numbers — sort by this; do not assume continuity. */
+  order: number | null;
   required_structure: string[];
 }
 

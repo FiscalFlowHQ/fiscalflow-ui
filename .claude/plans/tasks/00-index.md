@@ -41,9 +41,9 @@ run workspace under `/run/:threadId`.
 | 01 | [Scaffolding & app shell](task-01-scaffolding.md) | — | 01+ | done | 2026-07-14 | Routes, env, AppShell, Vitest/RTL/msw, proxy, health dot |
 | 02 | [Types & REST API client](task-02-api-client.md) | 01 | 03, 09 | done | 2026-07-14 | fiscalflow.ts + types/api; ApiError; MSW tests; BE drift noted |
 | 03 | [SSE streaming client](task-03-sse-client.md) | 02 | 08 | done | 2026-07-14 | sse.ts + types; start/resume/continue; fixture tests; token drift noted |
-| 04 | [Session home & persistence](task-04-sessions.md) | 02 | 03 | todo | | |
-| 05 | [Databook upload & ingestion](task-05-databook.md) | 02, 04 | 09 | todo | | |
-| 06 | [Run composer](task-06-run-composer.md) | 04, 05 | 08 | todo | | |
+| 04 | [Session home & persistence](task-04-sessions.md) | 02 | 03 | done | 2026-07-14 | localStorage sessions; badges; New FDD run → /run/:id |
+| 05 | [Databook upload & ingestion](task-05-databook.md) | 02, 04 | 09 | done | 2026-07-14 | DatabookPanel + poll hook; Start gated on ready |
+| 06 | [Run composer](task-06-run-composer.md) | 04, 05 | 08 | done | 2026-07-14 | Composer + GET /sections + streamStart; Start gated on ready |
 | 07 | [Pipeline progress rail](task-07-pipeline-rail.md) | 03 | 08 | todo | | |
 | 08 | [HITL review system](task-08-hitl-review.md) | 03, 07 | 04, 08 | todo | | |
 | 09 | [Artifact viewers](task-09-artifact-viewers.md) | 08 | — | todo | | |

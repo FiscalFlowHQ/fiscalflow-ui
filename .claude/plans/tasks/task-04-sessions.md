@@ -76,8 +76,32 @@ Home + persistence + correct badges; Handoff updated.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/types/session.ts` — `LocalSession` + `SESSIONS_STORAGE_KEY` (`fiscalflow.sessions.v1`).
+- `src/stores/sessionStore.ts` — load/upsert/remove/touch/patch persistence (sorted by
+  `lastOpenedAt`).
+- `src/hooks/useSessionList.ts` — create (`POST /sessions`), open, delete (local-only),
+  `updateSession` patch API for later tasks; status refresh with **max 10 parallel**
+  (`getSessionStatus` + `getSessionState` for non-terminal runs).
+- `src/lib/runStatusBadge.ts` — Draft / Running / Awaiting review / Complete / Failed /
+  Cancelled (`paused` from interrupt wins over `run_status`).
+- `HomePage` — session list, empty state, offline banner, working **New FDD run**.
+- `RunPage` — touches `lastOpenedAt` (or upserts a local stub for deep-links).
+- Tests: badge + store + Home flows (47 total green); build green.
+
+### Contracts for task 05+
+- After databook upload, call `useSessionList().updateSession(threadId, { documentRef })`
+  or `patchSession` from the store so Home cards show the truncated ref.
+- After runs/HITL, patch `lastRunStatus` / `paused` — or rely on Home remount refresh.
+- Do **not** call `start` from Home (upload + composer live on Run).
+
+### Notes
+- Delete removes local metadata only — BE session/checkpointer is untouched.
+- Status refresh failures leave prior chip values (network blips don't wipe the list).
+- Title default: `FDD run · {first 8 of threadId}` (rename UI deferred).
