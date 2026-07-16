@@ -92,8 +92,36 @@ Integrated workspace + orchestrator phases; Handoff documents poll interval choi
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/hooks/useRunOrchestrator.ts` — phase machine:
+  `no_document | ready | streaming | paused | server_running | completed | failed | cancelled`.
+  Fans out SSE to pipeline + artifacts + HITL; `startRun` / `resumeRun` with double-start
+  guard; mount reconnect via `GET /status` + `GET /state`.
+- `src/pages/RunPage.tsx` — thin layout shell: breadcrumb Home → session title, status chip,
+  Cancel placeholder (disabled until task 11), three-column workspace.
+- `src/styles/run-workspace.css` — 1280 / 1100 / 768 breakpoints; artifact column widens on
+  `--paused`; `server_running` banner chrome.
+- Tests: `server_running` banner, mount hydrate from interrupt, poll → paused, double-start
+  guard (`classifyReconnectStatus` helper). **86** tests green; build green.
+
+### Poll interval
+- **`ORCHESTRATOR_POLL_MS = 4000`** (4s) for `server_running` status/state polling — matches
+  task 10/11 guidance. Tests can pass `{ pollMs }` to speed up.
+
+### Refresh / SSE reconnect behavior (task 10 scope)
+- On mount with active `run_status` and no interrupt → **`server_running`** + banner:
+  "Run in progress on server — live preview unavailable until the next pause or completion."
+- Poll until `state.interrupt` → **`paused`** (HITL from envelope) or terminal status.
+- Does **not** call `POST /continue` yet — that is task 11 (`useSessionReconnect`).
+- Do not fake a token stream while `server_running`.
+
+### For task 11 / 12
+- Wire Cancel (`cancelDisabled` placeholder) + abort in-flight SSE.
+- Add `/continue` recovery when `next` is non-empty and no interrupt (disconnect mid-node).
+- Chat transcript can read orchestrator phase + `hitl.history`.

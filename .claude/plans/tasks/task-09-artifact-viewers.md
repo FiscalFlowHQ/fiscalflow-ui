@@ -80,8 +80,43 @@ Artifact panel with five tabs; Handoff notes on the actual payloads observed.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/components/artifacts/MarkdownView.tsx` — shared markdown (no raw HTML); reused by
+  `InterruptCard` (task 08).
+- `LiveDraft.tsx` — rAF-batched token buffer, step label (`token.node`), auto-scroll toggle.
+- `EvidencePanel.tsx` — `section_state.evidence_bundle` + claims/`evidence_refs`.
+- `FindingsPanel.tsx` — `prior_findings` + `metadata.cross_section_review`
+  (contradictions / duplicates / cross-references).
+- `SectionsView.tsx` — accordion over `completed_sections` + in-progress `section_state`
+  (live badge, `quality_verdict`, persona `review_notes`).
+- `ArtifactPanel.tsx` — tabs Live | Sections | Evidence | Findings | Report.
+- `useArtifactState.ts` — SSE tokens + GET /state hydration + Report via
+  `GET /document?format=md` after `completed`; reconnect Live reseeds from
+  `section_state.draft` when no token stream yet.
+- Types tightened: `CompletedSection`, `Finding`, `SectionState`, `CrossSectionReview`, etc.
+- Fixture: `fixtures/sessionState.sample.ts` (assembly-shaped mock, not live capture).
+- `RunPage` 3-column preview: rail | artifacts | databook/composer/HITL (task 10 owns
+  orchestrator polish).
+- Tests: 100-token batch, state hydrate, report fetch, panel tabs (81 total green); build green.
+
+### Payload / BE drift notes
+- **Live `GET /state`** (`sessions.py`) returns `{ values, next, interrupt }` only —
+  **`section_state` is omitted**. UI tolerates null; Evidence/Sections “live” rows stay empty
+  until remediation lands. Mid-run draft still works via SSE tokens + interrupt `content.draft`.
+- `final_document` / `metadata.artifacts` are **filesystem paths** — never rendered; Report
+  tab uses `downloadDocument(…, "md")` only.
+- Sample fixture mirrors BE assembly/`Section` + `Finding` shapes (`claim` + `evidence_refs`;
+  claims also accept `claim_text`).
+
+### For task 10 / 11 / 15
+- Task 10: orchestrator should fan-out `artifacts.applyEvent` / `reset` / `refreshState`
+  (already wired on RunPage; fold into `useRunOrchestrator`).
+- Task 11: on reconnect, call `refreshState()` then rely on Live reseed from
+  `section_state.draft` (or tokens after continue).
+- Task 15: export buttons elsewhere; do not fetch path-valued artifact fields as content.

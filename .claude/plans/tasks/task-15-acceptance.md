@@ -75,8 +75,47 @@ Export works; README updated; acceptance table in Handoff; tracker all `reviewed
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- **Export** — `ExportBar` on Report tab; formats from `metadata.artifacts`
+  (`markdown`→md, `pptx`, `pdf`); downloads via `GET /document?format=` only
+  (`useArtifactState.downloadExport` + blob trigger). 404/422 surfaced in UI.
+- **Legacy parked** — `UploadPage` / `ReviewPage` moved to `src/legacy/` (excluded from
+  `tsconfig.app.json`); `/upload` and `/review/*` redirect to Home; README states
+  csv-fixer audit is not served.
+- **Polish** — HITL Approve/Answer autofocus + `:focus-visible` rings; report loading
+  skeleton; export empty/awaiting states.
+- **README** — architecture diagram, env table, sibling-API workflow, export notes.
+- Tests: `exportFormats.test.ts` + artifact export download; **109** tests green;
+  `npm run build` green. `tauri build` not run here (no Rust in agent env — see #10/#12).
+
+### Acceptance results
+
+| # | Result | Notes |
+|---|---|---|
+| 1 | **pass-by-test / ready** | Home + health covered by `App.test` / `HomePage.test` (needs live API for green health) |
+| 2 | **ready** | Session create → `/run/:id` (task 04); manual against live BE |
+| 3 | **ready** | Databook panel + ingestion tests; fixture: `fiscalflow-api/tests/fixtures/sample_databook.xlsx` |
+| 4 | **ready** | Pipeline SSE + orchestrator tests; manual balanced run |
+| 5 | **ready** | HITL card + resume/reject unit coverage; full regenerate+export edit survival = live |
+| 6 | **pass-by-test (export UI)** | Feature-detect + md download unit-tested; live pptx when BE writes `artifacts.pptx` |
+| 7 | **aligned** | `POST /continue` live on BE `task-12`; UI CTA ready for live verify |
+| 8 | **ready** | Cancel + 409 paths implemented (task 11); live verify |
+| 9 | **pass-by-test** | Settings store + SettingsPage health/token tests |
+| 10 | **deferred** | Tauri scaffold shipped (task 14); needs local Rust for `tauri:dev` / `tauri:build` |
+| 11 | **aligned** | `POST /instruction` live on BE `task-12`; composer wired; 404 = no run state |
+| 12 | **partial** | `npm test` + `npm run build` **pass**. `tauri build` deferred (no rustc here) |
+
+### BE gaps to clear before a billed acceptance run
+1. Strip `TESTING-ONLY-ASSUME-VALUES` from BE prompts (blocking item above).
+2. Contract vs `fiscalflow-api` **`task-12`**: `/continue`, `/instruction`, `interrupt_id`,
+   `section_state`, and `metadata.artifacts` are present — no FE gap for those routes.
+3. LibreOffice on API host if PDF acceptance is required.
+
+### Tracker
+All UI tasks **01–15** marked **reviewed** in `00-index.md` after this close-out.

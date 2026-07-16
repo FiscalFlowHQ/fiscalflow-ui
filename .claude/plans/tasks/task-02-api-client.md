@@ -105,8 +105,46 @@ Typed REST client complete and tested; Handoff lists any schema drift from BE.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/types/api.ts` — typed models for sessions, documents, HITL, status, providers, catalog.
+- `src/api/http.ts` — `requestJson` / `requestBlob` + `ApiError` (`status`, `detail`, `body`);
+  bearer via task-01 `getAuthHeaders()` / `apiUrl()`; FastAPI string + validation-array `detail`.
+- `src/api/fiscalflow.ts` — all non-SSE functions from the task brief.
+- Legacy `src/api/client.ts` untouched.
+- HomePage health probe now uses `checkHealth()` (no behavior change).
+- MSW tests in `src/api/fiscalflow.test.ts` — happy + 404/400/409/413/422 paths.
+- `npm test` 24+ green; `npm run build` green.
+
+### Client normalizations
+- `getSessionState`: defaults `section_state` to `null` when BE omits it.
+- `cancelRun`: defaults `was_running` to `cancelled` when BE omits it.
+
+### Schema drift vs live `fiscalflow-api` (tree as of 2026-07-14)
+
+UI types follow the **UI plan / remediation contract**. Live BE still behind on several items —
+treat as BE follow-ups, not UI bugs:
+
+| Area | UI client / types | Live BE today |
+|---|---|---|
+| `GET /sections` | `listSections()` | **Missing** — catalog only in `app/domain/sections.yaml` + registry |
+| `POST /sessions/{id}/instruction` | `sendInstruction()` | **Missing** |
+| `ResumeRequest.interrupt_id` / `reason` | Declared on types (SSE task 03) | `schemas.ResumeRequest` has only `action` + `edited_content` |
+| `InterruptEnvelope.interrupt_id` | Required on types | `hitl.InterruptEnvelope` has no `interrupt_id` |
+| `GET .../state` → `section_state` | Normalized to `null` if absent | Not returned |
+| `POST .../cancel` → `was_running` | Normalized | Omitted (`{ cancelled, run_status }` only) |
+| Upload 413 / unknown-session 404 | Client maps status codes | Upload does not enforce size cap or session existence yet |
+| `StartGenerationRequest.approval_policy` default | UI docs say composer default `"balanced"` | BE pydantic default `"thorough"` if omitted |
+
+Known live catalog ids (from `sections.yaml`): `business_overview` (order 1),
+`quality_of_earnings` (order 3).
+
+### Next
+- Task 03: SSE over `start` / `resume` / `continue` using these types + `ApiError`.
+- Task 04+: import from `../api/fiscalflow` and `../types/api` only — do not call raw `fetch`
+  for fiscalflow-api REST.

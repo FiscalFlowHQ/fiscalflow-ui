@@ -55,8 +55,41 @@ Settings page live; Handoff lists env vars needed for Z.ai pilot.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/stores/settingsStore.ts` + `types/settings.ts` — localStorage
+  `fiscalflow.settings.v1` (`apiBaseUrl`, `apiToken`, `documentPollIntervalMs`).
+- `src/config/env.ts` — `getEffectiveApiBaseUrl` / `getEffectiveApiToken`;
+  `apiUrl` + `getAuthHeaders()` read the store first, then Vite env (immediate after Save).
+- `src/pages/SettingsPage.tsx` — API connection (masked token, Clear, Test + CORS hints),
+  LLM provider form (`GET`/`PUT /settings/providers`, key badges), Advanced poll ms +
+  README link.
+- `probeHealth()` — one-shot `/health` using form URL/token without mutating the store.
+- `RunComposer` — warning + link to Settings when the effective provider has
+  `key_present: false` (or no keys at all).
+- `DatabookPanel` — honors saved poll interval when prop omitted.
+- Tests: `settingsStore.test.ts`, `SettingsPage.test.tsx`; **104** tests green; build green.
+
+### Z.ai pilot — API server env vars
+Set on **fiscalflow-api** (not in the UI):
+
+| Var | Purpose |
+|---|---|
+| `ZAI_API_KEY` | Primary key for provider `zai` (`key_present`) |
+| `ZHIPUAI_API_KEY` | Fallback / `glm` provider key map |
+| `AUDITOR_LLM_PROVIDER=zai` | Optional process default when no Settings selection |
+| `AUDITOR_LLM_MODEL=glm-4.7` | Optional model default |
+| `ZAI_BASE_URL` | Z.ai OpenAI-compatible base (coding paas URL from BE pilot notes) |
+| `FISCALFLOW_API_TOKEN` | Optional; match Settings / `VITE_API_TOKEN` bearer |
+| `FISCALFLOW_CORS_ORIGINS` | Include `http://localhost:5173` if Settings uses a direct API URL |
+
+UI Settings → save provider `zai` (+ model) after the key is present; empty API URL keeps the Vite proxy.
+
+### For task 14 / 15
+- Tauri should continue reading the same localStorage key (or migrate to secure storage).
+- Export/polish can deep-link “fix keys” from composer warnings to Settings.

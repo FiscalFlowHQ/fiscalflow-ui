@@ -11,9 +11,8 @@ The desktop app wraps **fiscalflow-api** (FastAPI + LangGraph). Users upload Exc
 databooks, watch a **SSE-streamed** FDD pipeline, and **approve/edit** at human-in-the-loop
 pauses. MVP is **local-first**: UI talks to `http://localhost:8000` (or Tauri sidecar later).
 
-**Already in repo (legacy — do not rebuild):** dark-theme CSS, audit review components
-(`ReviewPage`, sheet viewer, error sidebar) from csv-fixer port. **New work** is the FDD
-run workspace under `/run/:threadId`.
+**Already in repo (legacy — parked):** csv-fixer audit pages live under `src/legacy/` and
+are not routed. **Shipped work** is the FDD run workspace under `/run/:threadId`.
 
 ## Canonical reading
 
@@ -38,21 +37,21 @@ run workspace under `/run/:threadId`.
 
 | # | Task | Depends on | BE ready | Status | Date | Notes |
 |---|---|---|---|---|---|---|
-| 01 | [Scaffolding & app shell](task-01-scaffolding.md) | — | 01+ | todo | | |
-| 02 | [Types & REST API client](task-02-api-client.md) | 01 | 03, 09 | todo | | |
-| 03 | [SSE streaming client](task-03-sse-client.md) | 02 | 08 | todo | | |
-| 04 | [Session home & persistence](task-04-sessions.md) | 02 | 03 | todo | | |
-| 05 | [Databook upload & ingestion](task-05-databook.md) | 02, 04 | 09 | todo | | |
-| 06 | [Run composer](task-06-run-composer.md) | 04, 05 | 08 | todo | | |
-| 07 | [Pipeline progress rail](task-07-pipeline-rail.md) | 03 | 08 | todo | | |
-| 08 | [HITL review system](task-08-hitl-review.md) | 03, 07 | 04, 08 | todo | | |
-| 09 | [Artifact viewers](task-09-artifact-viewers.md) | 08 | — | todo | | |
-| 10 | [Run workspace layout](task-10-run-workspace.md) | 05–09 | — | todo | | |
-| 11 | [Reconnect, cancel & errors](task-11-lifecycle.md) | 03, 10 | 08 | todo | | |
-| 12 | [Chat transcript](task-12-chat-transcript.md) | 10 | — | todo | | |
-| 13 | [Settings screen](task-13-settings.md) | 02 | 15 | todo | | Providers API live on BE |
-| 14 | [Tauri desktop shell](task-14-tauri.md) | 10 | — | todo | | |
-| 15 | [Export, polish & acceptance](task-15-acceptance.md) | 10–14 | 14, 15 | todo | | `GET /document?format=` live on BE |
+| 01 | [Scaffolding & app shell](task-01-scaffolding.md) | — | 01+ | reviewed | 2026-07-14 | Routes, env, AppShell, Vitest/RTL/msw, proxy, health dot |
+| 02 | [Types & REST API client](task-02-api-client.md) | 01 | 03, 09 | reviewed | 2026-07-14 | fiscalflow.ts + types/api; ApiError; MSW tests; BE drift noted |
+| 03 | [SSE streaming client](task-03-sse-client.md) | 02 | 08 | reviewed | 2026-07-14 | sse.ts + types; start/resume/continue; fixture tests; token drift noted |
+| 04 | [Session home & persistence](task-04-sessions.md) | 02 | 03 | reviewed | 2026-07-14 | localStorage sessions; badges; New FDD run → /run/:id |
+| 05 | [Databook upload & ingestion](task-05-databook.md) | 02, 04 | 09 | reviewed | 2026-07-14 | DatabookPanel + poll hook; Start gated on ready |
+| 06 | [Run composer](task-06-run-composer.md) | 04, 05 | 08 | reviewed | 2026-07-14 | Composer + GET /sections + streamStart; Start gated on ready |
+| 07 | [Pipeline progress rail](task-07-pipeline-rail.md) | 03 | 08 | reviewed | 2026-07-14 | Loop-aware reducer + rail; vocab fixture (live capture pending) |
+| 08 | [HITL review system](task-08-hitl-review.md) | 03, 07 | 04, 08 | reviewed | 2026-07-14 | InterruptCard/Stack + useHitlResume; 409→state; bulk plan approve |
+| 09 | [Artifact viewers](task-09-artifact-viewers.md) | 08 | — | reviewed | 2026-07-14 | 5-tab ArtifactPanel + useArtifactState; section_state drift noted |
+| 10 | [Run workspace layout](task-10-run-workspace.md) | 05–09 | — | reviewed | 2026-07-14 | useRunOrchestrator + 3-col layout; 4s server_running poll |
+| 11 | [Reconnect, cancel & errors](task-11-lifecycle.md) | 03, 10 | 08 | reviewed | 2026-07-14 | continue CTA + cancel + toasts; aligned with BE task-12 `/continue` |
+| 12 | [Chat transcript](task-12-chat-transcript.md) | 10 | — | reviewed | 2026-07-14 | ChatPanel + useTranscript; inline HITL; `/instruction` wired to BE task-12 |
+| 13 | [Settings screen](task-13-settings.md) | 02 | 15 | reviewed | 2026-07-14 | SettingsPage + settingsStore; providers GET/PUT; key badges; Z.ai env handoff |
+| 14 | [Tauri desktop shell](task-14-tauri.md) | 10 | — | reviewed | 2026-07-14 | src-tauri + dialog picker; sidecar skipped; CORS/API manual start documented |
+| 15 | [Export, polish & acceptance](task-15-acceptance.md) | 10–14 | 14, 15 | reviewed | 2026-07-14 | ExportBar + legacy parked; acceptance table in handoff; 109 tests |
 
 Statuses: `todo` → `in-progress` → `done` → `reviewed`.
 

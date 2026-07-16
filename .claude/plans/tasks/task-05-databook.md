@@ -68,8 +68,33 @@ Databook panel + polling hook; Handoff notes.
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/hooks/useDocumentIngestion.ts` — upload + 1.5s poll until `ready`/`failed`;
+  stops on unmount; accepts `.xlsx/.xls/.xlsm/.xlsb`.
+- `src/components/databook/DatabookPanel.tsx` — dropzone, stepper
+  (Queued → Auditing → Ingesting → Ready/Failed), audit_status, truncated ref,
+  Try again.
+- `RunPage` — databook panel + **Start generation** gated on `ready` (button remains
+  no-op until task 06); persists `documentRef` via `patchSession`.
+- Tests: hook poll/fail/unmount + panel Start gate (54 total green); build green.
+
+### Contract for task 06
+- Gate Start on `databookReady` / `onReadyChange(true, documentRef)`.
+- Pass `documentRef` into `StartGenerationRequest.document_ref` (or rely on BE
+  session-bound active document).
+- Do not start while status is non-`ready`.
+
+### Manual QA
+- Fixture: `fiscalflow-api/tests/fixtures/sample_databook.xlsx` → Ready in ~seconds
+  keyless with API on `:8000`.
+
+### Notes
+- Live BE upload path notes (task-09): original filename kept for workbook_id stability.
+- UI still tolerant of missing 413/404 session checks if BE hasn't hardened them yet.
+- Full multi-pane workspace layout is still task 10; this is a functional shell panel.

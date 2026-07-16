@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import * as api from "../api/client";
 import TopBar from "../components/TopBar";
 import FilterRow from "../components/Sidebar/FilterRow";
@@ -13,9 +13,16 @@ import type { ErrorEntry, ErrorListItem, Progress, SheetData } from "../types";
 
 const PER_PAGE = 50;
 
+/**
+ * Excel Auditor review workspace — errors listed in the left sidebar.
+ * Opened from DatabookPanel when ingestion audit fails (`/review/:auditId`).
+ */
 export default function ReviewPage() {
   const { auditId } = useParams<{ auditId: string }>();
   const id = auditId!;
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get("return") || "/";
 
   const [sheetNames, setSheetNames] = useState<string[]>([]);
   const [listErrors, setListErrors] = useState<ErrorListItem[]>([]);
@@ -32,6 +39,8 @@ export default function ReviewPage() {
   const [sheetData, setSheetData] = useState<SheetData | null>(null);
   const [sheetLoading, setSheetLoading] = useState(false);
   const [sheetPreview, setSheetPreview] = useState(false);
+  const [reingesting, setReingesting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [progress, setProgress] = useState<Progress>({
     total: 0,
     resolved: 0,
@@ -59,6 +68,7 @@ export default function ReviewPage() {
           status: currentFilter,
           sheet: currentSheet,
         });
+        setLoadError(null);
         setTotalFiltered(data.total);
         setListErrors((prev) => {
           const merged = reset ? data.errors : [...prev, ...data.errors];
@@ -68,7 +78,13 @@ export default function ReviewPage() {
         setCurrentPage(page);
         if (data.sheets_with_errors) {
           setSheetsWithErrors(new Set(data.sheets_with_errors));
+          // Seed tabs immediately if /sheets is still pending on a huge workbook.
+          setSheetNames((prev) =>
+            prev.length > 0 ? prev : [...data.sheets_with_errors]
+          );
         }
+      } catch (err) {
+        setLoadError(err instanceof Error ? err.message : "Failed to load errors");
       } finally {
         loadingMoreRef.current = false;
         setLoadingMore(false);
@@ -78,8 +94,20 @@ export default function ReviewPage() {
   );
 
   useEffect(() => {
-    api.fetchSheets(id).then(setSheetNames);
-    updateProgress();
+    let cancelled = false;
+    api
+      .fetchSheets(id)
+      .then((names) => {
+        if (!cancelled) setSheetNames(names);
+      })
+      .catch((err) => {
+        console.error("[fiscalflow] fetchSheets failed", err);
+        if (!cancelled) setSheetNames([]);
+      });
+    updateProgress().catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
   }, [id, updateProgress]);
 
   useEffect(() => {
@@ -97,9 +125,14 @@ export default function ReviewPage() {
     setCurrentError(detail);
     setSheetPreview(false);
     setSheetLoading(true);
+    setSheetData(null);
     try {
       const data = await api.fetchSheetData(id, detail.sheet_name, detail.cell_address, 8);
       setSheetData(data);
+    } catch (err) {
+      setSheetData({
+        error: err instanceof Error ? err.message : "Failed to load sheet",
+      } as SheetData);
     } finally {
       setSheetLoading(false);
     }
@@ -110,9 +143,14 @@ export default function ReviewPage() {
     if (sheetName) {
       setSheetPreview(true);
       setSheetLoading(true);
+      setSheetData(null);
       try {
         const data = await api.fetchSheetData(id, sheetName, "A1", 12);
         setSheetData(data);
+      } catch (err) {
+        setSheetData({
+          error: err instanceof Error ? err.message : "Failed to load sheet",
+        } as SheetData);
       } finally {
         setSheetLoading(false);
       }
@@ -124,9 +162,12 @@ export default function ReviewPage() {
 
   const goToNextError = () => {
     const unresolved = listErrors.filter(
-      (e) => e.fix_status !== "resolved" && e.fix_status !== "auto_fixed" && e.fix_status !== "skipped"
+      (e) =>
+        e.fix_status !== "resolved" &&
+        e.fix_status !== "auto_fixed" &&
+        e.fix_status !== "skipped"
     );
-    if (unresolved.length > 0) selectError(unresolved[0].id);
+    if (unresolved.length > 0) void selectError(unresolved[0].id);
   };
 
   const handleApply = async (formula: string) => {
@@ -157,7 +198,7 @@ export default function ReviewPage() {
   };
 
   const handleAcceptSuggestion = () => {
-    if (currentError?.suggested_fix) handleApply(currentError.suggested_fix);
+    if (currentError?.suggested_fix) void handleApply(currentError.suggested_fix);
   };
 
   const handleSkip = async () => {
@@ -179,7 +220,9 @@ export default function ReviewPage() {
     const data = await api.undoFix(id);
     if (data.success && data.undone) {
       setListErrors((prev) =>
-        prev.map((e) => (e.id === data.undone!.error_id ? { ...e, fix_status: "needs_human" } : e))
+        prev.map((e) =>
+          e.id === data.undone!.error_id ? { ...e, fix_status: "needs_human" } : e
+        )
       );
       setErrorDetailCache((c) => {
         const next = { ...c };
@@ -187,7 +230,7 @@ export default function ReviewPage() {
         return next;
       });
       await updateProgress();
-      if (currentError?.id === data.undone.error_id) selectError(currentError.id);
+      if (currentError?.id === data.undone.error_id) void selectError(currentError.id);
     }
   };
 
@@ -196,18 +239,63 @@ export default function ReviewPage() {
     if (data.success) alert("Report saved to: " + data.path);
   };
 
-  const pct = progress.total > 0 ? ((progress.resolved + progress.skipped) / progress.total) * 100 : 0;
+  const handleReingest = async () => {
+    setReingesting(true);
+    try {
+      const result = await api.reingestAudit(id);
+      if (result.passed) {
+        navigate(returnTo);
+      } else {
+        alert(result.summary || "Audit still failing — keep fixing critical issues.");
+        await loadErrorPage(1, true);
+        await updateProgress();
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Re-ingest failed");
+    } finally {
+      setReingesting(false);
+    }
+  };
+
+  const pct =
+    progress.total > 0 ? ((progress.resolved + progress.skipped) / progress.total) * 100 : 0;
   const progressText = `${progress.resolved} fixed / ${progress.total} total`;
 
   return (
-    <div className="app">
+    <div className="app audit-review-app">
       <TopBar
         progressPct={pct}
         progressText={progressText}
-        onUndo={handleUndo}
+        onUndo={() => {
+          void handleUndo();
+        }}
         onDownload={() => window.open(api.downloadUrl(id), "_blank")}
-        onSaveReport={handleSaveReport}
+        onSaveReport={() => {
+          void handleSaveReport();
+        }}
+        leading={
+          <Link to={returnTo} className="topbar-btn topbar-back">
+            ← Back to run
+          </Link>
+        }
+        trailing={
+          <button
+            type="button"
+            className="topbar-btn topbar-btn--accent"
+            disabled={reingesting}
+            onClick={() => {
+              void handleReingest();
+            }}
+          >
+            {reingesting ? "Re-checking…" : "Re-check & ingest"}
+          </button>
+        }
       />
+      {loadError && (
+        <div className="audit-review-banner" role="alert">
+          {loadError}
+        </div>
+      )}
       <div className="sidebar">
         <div className="sidebar-header">
           <h2>Errors to Review</h2>
@@ -228,8 +316,12 @@ export default function ReviewPage() {
               return next;
             });
           }}
-          onSelect={selectError}
-          onLoadMore={() => loadErrorPage(currentPage + 1, false)}
+          onSelect={(errorId) => {
+            void selectError(errorId);
+          }}
+          onLoadMore={() => {
+            void loadErrorPage(currentPage + 1, false);
+          }}
         />
       </div>
       <SheetViewer data={sheetData} loading={sheetLoading} preview={sheetPreview} />
@@ -237,16 +329,22 @@ export default function ReviewPage() {
         sheetNames={sheetNames}
         sheetsWithErrors={sheetsWithErrors}
         currentSheet={currentSheet}
-        onSelectSheet={selectSheet}
+        onSelectSheet={(name) => {
+          void selectSheet(name);
+        }}
       />
       <div className="detail-panel">
         <ErrorDetails error={currentError} />
         <FixEditor
           error={currentError}
           sheetNames={sheetNames}
-          onApply={handleApply}
+          onApply={(formula) => {
+            void handleApply(formula);
+          }}
           onAcceptSuggestion={handleAcceptSuggestion}
-          onSkip={handleSkip}
+          onSkip={() => {
+            void handleSkip();
+          }}
         />
         <DepChain error={currentError} />
       </div>

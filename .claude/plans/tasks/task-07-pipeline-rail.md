@@ -126,8 +126,36 @@ Pipeline rail + hook; loop-aware reducer tests from a recorded fixture; Handoff 
 
 ---
 
-## Status: todo
+## Status: done
 
 ## Handoff notes
 
-_(fill at completion)_
+Completed 2026-07-14.
+
+### What shipped
+- `src/components/pipeline/pipelineModel.ts` — outer 13-node vocabulary + display phases;
+  inner `SECTION_STEP_ORDER` + `{id}.{phase}` parsing; section cursor (not namespace).
+- `src/components/pipeline/pipelineReducer.ts` — loop-aware regen reset; optional-gate
+  skip (`approve_global` / `approve_section` / `review_section`); interrupt / done / error.
+- `src/hooks/usePipelineProgress.ts` — reducer hook + optional `GET /status` poll when
+  `run_status === awaiting_approval` (BE #24 resilience).
+- `src/components/pipeline/PipelineRail.tsx` — ~240px sticky rail; section collapse;
+  regen badge; unmapped-node debug list.
+- `RunPage` wires Start → `reset(selected_sections)` + SSE → `applyEvent`.
+- Tests: 6 reducer cases incl. regen loop (68 total green); build green.
+
+### Fixture note
+- `fixtures/sseSteps.vocabulary.ts` uses **verified BE node ids** from outer.py /
+  SECTION_STEP_ORDER / make_step_cycle. API was down, so this is **not** a live
+  `sse_client.py` capture. Replace with a recorded stream (force one quality-gate fail)
+  before acceptance: `python scripts/sse_client.py --auto` and paste `step` lines.
+
+### Contract for task 08/10/11
+- Rail keeps step `active` on interrupt — HITL card should use envelope `step_id`/`phase`.
+- Reconnect hydration (task 11): seed from `GET /state` (`current_section_index`,
+  `section_state.step_trace`); rail alone must not be the only pause signal.
+- Layout placement refined in task 10 — current left column is intentional.
+
+### Unknown nodes
+- Reducer records unmapped names in `state.unknownNodes` (e.g. invented `plan_report`).
+  Log live mismatches in a follow-up Handoff after a real capture.
