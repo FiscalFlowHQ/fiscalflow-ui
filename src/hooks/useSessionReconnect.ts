@@ -138,8 +138,8 @@ export type UseSessionReconnectResult = {
 };
 
 /**
- * Checkpoint recovery via `POST /continue` (no stream re-attach).
- * Live BE may still 404 this route — callers should surface the error and keep polling.
+ * Checkpoint recovery via `POST /continue` (re-drives from checkpoint / re-fires interrupt).
+ * `404` = unknown thread; `409` = mid-execution, cancelled, or idle/complete.
  */
 export function useSessionReconnect(
   options: UseSessionReconnectOptions
@@ -173,10 +173,12 @@ export function useSessionReconnect(
     setContinueError(null);
 
     try {
-      onBeginStreamRef.current?.();
       await streamContinue(
         threadId,
         {
+          onOpen: () => {
+            onBeginStreamRef.current?.();
+          },
           onEvent: (ev) => {
             onStreamEventRef.current?.(ev);
             onEventRef.current?.(ev);
@@ -190,9 +192,11 @@ export function useSessionReconnect(
       let message = "Continue failed";
       if (err instanceof ApiError) {
         if (err.status === 404) {
-          message = `${err.detail} POST /continue is unavailable on this API build — wait for the next pause, or cancel and restart.`;
+          message =
+            err.detail ||
+            "Unknown session — nothing to continue on this thread.";
         } else if (err.status === 409) {
-          message = `${err.detail} The run may already be cancelled or mid-execution — refresh state before retrying.`;
+          message = `${err.detail} Refresh state before retrying (cancelled, idle, or mid-execution).`;
         } else {
           message = err.detail;
         }

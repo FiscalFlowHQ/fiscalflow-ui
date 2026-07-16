@@ -93,7 +93,46 @@ describe("app shell routes", () => {
     });
   });
 
-  it("redirects parked legacy audit routes to home", async () => {
+  it("renders Excel Auditor review route", async () => {
+    server.use(
+      http.get("/api/audits/:id/sheets", () => HttpResponse.json({ sheets: ["Sheet1"] })),
+      http.get("/api/audits/:id/progress", () =>
+        HttpResponse.json({
+          total: 1,
+          resolved: 0,
+          skipped: 0,
+          remaining: 1,
+          history_count: 0,
+        })
+      ),
+      http.get("/api/audits/:id/errors", () =>
+        HttpResponse.json({
+          errors: [
+            {
+              id: "ERR-001",
+              sheet_name: "Sheet1",
+              cell_address: "A1",
+              full_address: "Sheet1!A1",
+              error_category: "#REF!",
+              fix_status: "needs_human",
+              explanation: "Broken ref",
+            },
+          ],
+          total: 1,
+          page: 1,
+          per_page: 50,
+          sheets_with_errors: ["Sheet1"],
+        })
+      )
+    );
+    renderAt("/review/doc-fail");
+    await waitFor(() => {
+      expect(screen.getByText(/errors to review/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/excel auditor/i)).toBeInTheDocument();
+  });
+
+  it("redirects parked upload route to home", async () => {
     renderAt("/upload");
     await waitFor(() => {
       expect(screen.getByRole("heading", { name: "FiscalFlow" })).toBeInTheDocument();

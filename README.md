@@ -19,8 +19,10 @@ review human-in-the-loop pauses, and **export** the assembled report
    Chat · HITL · Export
 ```
 
-The csv-fixer **audit review** flow is **not** part of this app (no `/api/audits` in either
-repo). Legacy pages are parked under `src/legacy/`; `/upload` and `/review/*` redirect home.
+The csv-fixer **audit review** flow is available only when `FISCALFLOW_SKIP_AUDIT=false`
+and a databook fails ExcelAuditor: use **Review errors** → `/review/:auditId`.
+By default (`FISCALFLOW_SKIP_AUDIT=true`, same as `run_pilot.py --skip-audit`) upload
+goes straight to extract & index using your LLM/embedding env settings.
 
 ## Stack
 

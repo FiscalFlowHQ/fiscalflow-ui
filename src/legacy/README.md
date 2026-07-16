@@ -1,10 +1,9 @@
-# Parked: csv-fixer audit UI
+# Parked upload entry; review UI is live
 
-These pages (`UploadPage`, `ReviewPage`) are **not routed**. They called `/api/audits/*`,
-which does not exist in fiscalflow-api or this app’s FDD surface.
+`UploadPage` stays unused (`/upload` → home). The **Review** workspace is wired again:
 
-- `/upload` and `/review/*` redirect to Home (`/`).
-- Sidebar audit components under `src/components/` remain for historical reference;
-  task 15 does not treat “legacy review works” as an acceptance criterion.
+- Route: `/review/:auditId` (`src/pages/ReviewPage.tsx`)
+- API: `fiscalflow-api` `GET/POST /api/audits/*` (report beside uploaded workbook)
+- Entry: Databook panel **Review errors** when `audit_status=failed` and `audit_id` is set
 
-Do not re-enable these routes without a real audits API.
+`src/legacy/ReviewPage.tsx` is superseded by `src/pages/ReviewPage.tsx`.

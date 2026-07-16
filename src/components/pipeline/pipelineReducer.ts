@@ -1,4 +1,5 @@
 import type { SseEvent } from "../../types/sse";
+import { hydratePipelineState, type PipelineHydrateInput } from "./pipelineHydrate";
 import {
   OPTIONAL_OUTER_GATES,
   OUTER_NODE_ORDER,
@@ -15,6 +16,7 @@ import {
 
 export type PipelineAction =
   | { type: "reset"; selectedSections: string[] }
+  | { type: "hydrate"; input: PipelineHydrateInput }
   | { type: "sse"; event: SseEvent }
   | { type: "status_hint"; awaitingApproval: boolean };
 
@@ -279,6 +281,8 @@ export function pipelineReducer(
   switch (action.type) {
     case "reset":
       return createInitialPipelineState(action.selectedSections);
+    case "hydrate":
+      return hydratePipelineState(action.input);
     case "status_hint":
       return { ...state, awaitingReview: action.awaitingApproval || state.awaitingReview };
     case "sse": {
@@ -287,7 +291,34 @@ export function pipelineReducer(
         return applyStepEvent(state, ev.node);
       }
       if (ev.type === "interrupt") {
-        return { ...state, awaitingReview: true };
+        const env = ev.envelope;
+        let next: PipelineState = { ...state, awaitingReview: true };
+        if (env.step_id && env.tier === "step") {
+          const phase: StepPhase =
+            env.phase === "plan"
+              ? "plan"
+              : env.phase === "clarification"
+                ? "clarify"
+                : "review";
+          const inner = applyInnerStep(next, `${env.step_id}.${phase}`);
+          if (inner) next = { ...inner, awaitingReview: true };
+        } else if (env.tier === "section" && env.phase === "plan") {
+          next = {
+            ...applyOuterStep(next, "approve_section"),
+            awaitingReview: true,
+          };
+        } else if (env.tier === "global" && env.phase === "plan") {
+          next = {
+            ...applyOuterStep(next, "approve_global"),
+            awaitingReview: true,
+          };
+        } else if (env.tier === "section" && env.phase === "review") {
+          next = {
+            ...applyOuterStep(next, "review_section"),
+            awaitingReview: true,
+          };
+        }
+        return next;
       }
       if (ev.type === "done") {
         return markAllDone(state);

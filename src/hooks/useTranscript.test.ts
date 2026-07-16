@@ -82,6 +82,19 @@ describe("useTranscript", () => {
     });
   });
 
+  it("dedupes repeated Databook ready system lines", () => {
+    const { result } = renderHook(() => useTranscript(THREAD));
+    act(() => {
+      result.current.logSystem("Databook ready (doc-1).");
+      result.current.logSystem("Databook ready (doc-1).");
+      result.current.logSystem("Databook ready (doc-1).");
+      result.current.logSystem("Decision submitted — generation resuming…");
+    });
+    expect(
+      result.current.entries.filter((e) => e.kind === "system")
+    ).toHaveLength(2);
+  });
+
   it("logs decisions idempotently and clearForNewRun confirms", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
     const { result } = renderHook(() => useTranscript(THREAD));

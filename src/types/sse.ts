@@ -14,6 +14,8 @@ export type SseEvent =
 export type SseHandlers = {
   onEvent: (ev: SseEvent) => void;
   onClose?: () => void;
+  /** Fired after HTTP 200 and before the first SSE event (stream actually accepted). */
+  onOpen?: () => void;
 };
 
 export type GenerationStreamPath = "start" | "resume" | "continue";

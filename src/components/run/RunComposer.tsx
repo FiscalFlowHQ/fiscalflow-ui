@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { getProviderSettings } from "../../api/fiscalflow";
 import { useSectionCatalog } from "../../hooks/useSectionCatalog";
 import type {
@@ -27,10 +27,15 @@ export default function RunComposer({
   onStart,
   onClearStartError,
 }: RunComposerProps) {
+  const location = useLocation();
+  const settingsTo = `/settings?return=${encodeURIComponent(
+    location.pathname + location.search
+  )}`;
   const { sections, loading, error: catalogError, refresh } = useSectionCatalog();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [instruction, setInstruction] = useState("");
   const [policy, setPolicy] = useState<ApprovalPolicyName>("balanced");
+  const [autoApprovePlans, setAutoApprovePlans] = useState(false);
   const [providerOverride, setProviderOverride] = useState<string>("");
   const [providers, setProviders] = useState<AvailableProvider[]>([]);
   const [defaultProvider, setDefaultProvider] = useState<string | null>(null);
@@ -122,6 +127,7 @@ export default function RunComposer({
       approval_policy: policy,
       instruction: instruction.trim() || null,
       provider_override: providerOverride || null,
+      auto_approve_plans: autoApprovePlans,
     };
     onStart(body);
   }
@@ -224,6 +230,19 @@ export default function RunComposer({
         </label>
       </fieldset>
 
+      <label className="run-composer__check">
+        <input
+          type="checkbox"
+          checked={autoApprovePlans}
+          disabled={locked}
+          onChange={(e) => setAutoApprovePlans(e.target.checked)}
+        />
+        <span>
+          <strong>Auto-approve plan gates</strong> — skip global, section, and step
+          plan pauses; still stop for reviews and clarifications.
+        </span>
+      </label>
+
       {providers.length > 0 && (
         <label className="run-composer__field">
           <span>Provider override (optional)</span>
@@ -247,7 +266,7 @@ export default function RunComposer({
       {providerKeyWarning && (
         <p className="run-composer__warn" role="status">
           {providerKeyWarning}{" "}
-          <Link to="/settings">Open Settings</Link>
+          <Link to={settingsTo}>Open Settings</Link>
         </p>
       )}
 

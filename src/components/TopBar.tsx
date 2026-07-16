@@ -1,17 +1,32 @@
+import type { ReactNode } from "react";
+
 interface TopBarProps {
   progressPct: number;
   progressText: string;
   onUndo: () => void;
   onDownload: () => void;
   onSaveReport: () => void;
+  leading?: ReactNode;
+  trailing?: ReactNode;
 }
 
-export default function TopBar({ progressPct, progressText, onUndo, onDownload, onSaveReport }: TopBarProps) {
+export default function TopBar({
+  progressPct,
+  progressText,
+  onUndo,
+  onDownload,
+  onSaveReport,
+  leading,
+  trailing,
+}: TopBarProps) {
   return (
     <div className="topbar">
-      <h1>
-        <span>&#x2B21;</span> Excel Auditor &mdash; Review Mode
-      </h1>
+      <div className="topbar-title-row">
+        {leading}
+        <h1>
+          <span>&#x2B21;</span> Excel Auditor &mdash; Review Mode
+        </h1>
+      </div>
       <div className="topbar-actions">
         <div className="progress-bar">
           <div className="progress-fill" style={{ width: `${progressPct}%` }} />
@@ -26,6 +41,7 @@ export default function TopBar({ progressPct, progressText, onUndo, onDownload, 
         <button type="button" className="topbar-btn" onClick={onSaveReport}>
           &#x1F4BE; Save Report
         </button>
+        {trailing}
       </div>
     </div>
   );

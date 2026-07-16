@@ -111,6 +111,569 @@ describe("useRunOrchestrator", () => {
     expect(result.current.banner).toBeNull();
   });
 
+  it("restores databookReady from session documentRef after ingest-only return", async () => {
+    const now = new Date().toISOString();
+    localStorage.setItem(
+      "fiscalflow.sessions.v1",
+      JSON.stringify([
+        {
+          threadId: "t-restore",
+          title: "FDD run · restored",
+          createdAt: now,
+          lastOpenedAt: now,
+          documentRef: "doc-already-ready",
+        },
+      ])
+    );
+
+    server.use(
+      http.get("/documents/doc-already-ready/status", () =>
+        HttpResponse.json({
+          status: "ready",
+          audit_status: "passed",
+          progress_pct: 100,
+        })
+      ),
+      // No generation yet — reconnect 404 must not clear databook readiness.
+      http.get("/sessions/t-restore/status", () =>
+        HttpResponse.json({ detail: "Unknown thread" }, { status: 404 })
+      ),
+      http.get("/sessions/t-restore/state", () =>
+        HttpResponse.json({ detail: "Unknown thread" }, { status: 404 })
+      )
+    );
+
+    const { result } = renderHook(() => useRunOrchestrator("t-restore"));
+
+    await waitFor(() => expect(result.current.hydrated).toBe(true));
+    await waitFor(() => expect(result.current.databookReady).toBe(true));
+    expect(result.current.documentRef).toBe("doc-already-ready");
+    expect(result.current.phase).toBe("ready");
+  });
+
+  it("after approve SSE dies mid-run, auto-continues from checkpoint", async () => {
+    const interrupt = {
+      interrupt_id: "irq-sec-plan",
+      tier: "section",
+      phase: "plan",
+      section_id: "business_overview",
+      step_id: null,
+      content: { section_plan: "Plan" },
+      allowed_actions: ["approve", "edit", "reject"],
+    };
+    const nextInterrupt = {
+      ...interrupt,
+      interrupt_id: "irq-after-continue",
+      content: { section_plan: "Next plan" },
+    };
+
+    let statusMode: "paused" | "orphaned" | "recovered" = "paused";
+    let continueHits = 0;
+
+    server.use(
+      http.get("/sessions/t-orphan/status", () => {
+        if (statusMode === "paused" || statusMode === "recovered") {
+          return HttpResponse.json({
+            run_status: "awaiting_approval",
+            audit_status: "passed",
+            current_section_index: 0,
+          });
+        }
+        return HttpResponse.json({
+          run_status: "generating",
+          audit_status: "passed",
+          current_section_index: 0,
+        });
+      }),
+      http.get("/sessions/t-orphan/state", () => {
+        if (statusMode === "paused") {
+          return HttpResponse.json({
+            values: {
+              selected_sections: ["business_overview"],
+              run_status: "awaiting_approval",
+            },
+            next: [],
+            interrupt,
+            section_state: null,
+          });
+        }
+        if (statusMode === "recovered") {
+          return HttpResponse.json({
+            values: {
+              selected_sections: ["business_overview"],
+              run_status: "awaiting_approval",
+            },
+            next: [],
+            interrupt: nextInterrupt,
+            section_state: {
+              section_id: "business_overview",
+              step_trace: ["gather_context"],
+            },
+          });
+        }
+        return HttpResponse.json({
+          values: {
+            selected_sections: ["business_overview"],
+            run_status: "generating",
+          },
+          next: ["run_section"],
+          interrupt: null,
+          section_state: { section_id: "business_overview", step_trace: ["gather_context"] },
+        });
+      }),
+      http.post("/sessions/t-orphan/resume", async () => {
+        statusMode = "orphaned";
+        const stream = new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode(
+                'event: step\ndata: {"node":"run_section","namespace":[]}\n\n'
+              )
+            );
+            controller.close();
+          },
+        });
+        return new HttpResponse(stream, {
+          headers: { "Content-Type": "text/event-stream" },
+        });
+      }),
+      http.post("/sessions/t-orphan/continue", async () => {
+        continueHits += 1;
+        statusMode = "recovered";
+        return sseResponse(
+          `event: interrupt\ndata: ${JSON.stringify(nextInterrupt)}\n\n`
+        );
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useRunOrchestrator("t-orphan", { pollMs: 60_000 })
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("paused"));
+    expect(result.current.hitl.current?.interrupt_id).toBe("irq-sec-plan");
+
+    await act(async () => {
+      result.current.resumeRun(
+        { action: "approve", interrupt_id: "irq-sec-plan" },
+        interrupt as never
+      );
+    });
+
+    await waitFor(() => expect(continueHits).toBe(1), { timeout: 3000 });
+    await waitFor(() => expect(result.current.phase).toBe("paused"), {
+      timeout: 3000,
+    });
+    expect(result.current.hitl.current?.interrupt_id).toBe("irq-after-continue");
+    expect(result.current.offerContinue).toBe(false);
+  });
+
+  it("approve that lands on a new interrupt does not auto-continue", async () => {
+    const interrupt = {
+      interrupt_id: "irq-plan-a",
+      tier: "section",
+      phase: "plan",
+      section_id: "business_overview",
+      step_id: null,
+      content: { section_plan: "Plan A" },
+      allowed_actions: ["approve", "edit", "reject"],
+    };
+    const nextInterrupt = {
+      ...interrupt,
+      interrupt_id: "irq-plan-b",
+      content: { section_plan: "Plan B" },
+    };
+
+    let continueHits = 0;
+    let mode: "first" | "after" = "first";
+
+    server.use(
+      http.get("/sessions/t-approve-ok/status", () =>
+        HttpResponse.json({
+          run_status: "awaiting_approval",
+          audit_status: "passed",
+          current_section_index: 0,
+        })
+      ),
+      http.get("/sessions/t-approve-ok/state", () => {
+        if (mode === "first") {
+          return HttpResponse.json({
+            values: {
+              selected_sections: ["business_overview"],
+              run_status: "awaiting_approval",
+            },
+            next: [],
+            interrupt,
+            section_state: null,
+          });
+        }
+        return HttpResponse.json({
+          values: {
+            selected_sections: ["business_overview"],
+            run_status: "awaiting_approval",
+          },
+          next: [],
+          interrupt: nextInterrupt,
+          section_state: {
+            section_id: "business_overview",
+            step_trace: ["gather_context"],
+          },
+        });
+      }),
+      http.post("/sessions/t-approve-ok/resume", async () => {
+        mode = "after";
+        return sseResponse(
+          `event: interrupt\ndata: ${JSON.stringify(nextInterrupt)}\n\n`
+        );
+      }),
+      http.post("/sessions/t-approve-ok/continue", async () => {
+        continueHits += 1;
+        return sseResponse("event: done\ndata: {}\n\n");
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useRunOrchestrator("t-approve-ok", { pollMs: 60_000 })
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("paused"));
+
+    await act(async () => {
+      result.current.resumeRun(
+        { action: "approve", interrupt_id: "irq-plan-a" },
+        interrupt as never
+      );
+    });
+
+    await waitFor(() => expect(result.current.phase).toBe("paused"), {
+      timeout: 3000,
+    });
+    expect(result.current.hitl.current?.interrupt_id).toBe("irq-plan-b");
+    expect(continueHits).toBe(0);
+    expect(
+      result.current.transcript.entries.some(
+        (e) =>
+          e.kind === "system" &&
+          e.text.includes("No pause left to approve")
+      )
+    ).toBe(false);
+  });
+
+  it("clears ghost pause card when server has no interrupt (offers Continue, no loop)", async () => {
+    const interrupt = {
+      interrupt_id: "irq-ghost",
+      tier: "step",
+      phase: "review",
+      section_id: "quality_of_earnings",
+      step_id: "distill_context",
+      content: { evidence_bundle: { items: [] } },
+      allowed_actions: ["approve", "edit", "reject"],
+    };
+
+    let mode: "ghost" | "orphan" = "ghost";
+    let continueHits = 0;
+
+    server.use(
+      http.get("/sessions/t-ghost/status", () => {
+        if (mode === "orphan") {
+          return HttpResponse.json({
+            run_status: "generating",
+            audit_status: "passed",
+            current_section_index: 1,
+          });
+        }
+        return HttpResponse.json({
+          run_status: "awaiting_approval",
+          audit_status: "passed",
+          current_section_index: 1,
+        });
+      }),
+      http.get("/sessions/t-ghost/state", () => {
+        if (mode === "ghost") {
+          return HttpResponse.json({
+            values: {
+              selected_sections: ["quality_of_earnings"],
+              run_status: "awaiting_approval",
+            },
+            next: [],
+            interrupt,
+            section_state: {
+              section_id: "quality_of_earnings",
+              step_trace: ["gather_context", "distill_context"],
+            },
+          });
+        }
+        return HttpResponse.json({
+          values: {
+            selected_sections: ["quality_of_earnings"],
+            run_status: "generating",
+          },
+          next: ["run_section"],
+          interrupt: null,
+          section_state: {
+            section_id: "quality_of_earnings",
+            step_trace: ["gather_context", "distill_context"],
+          },
+        });
+      }),
+      http.post("/sessions/t-ghost/continue", async () => {
+        continueHits += 1;
+        return sseResponse("event: done\ndata: {}\n\n");
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useRunOrchestrator("t-ghost", { pollMs: 80 })
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("paused"));
+    expect(result.current.hitl.current?.interrupt_id).toBe("irq-ghost");
+
+    mode = "orphan";
+
+    await waitFor(() => expect(result.current.phase).toBe("needs_continue"), {
+      timeout: 3000,
+    });
+    expect(result.current.hitl.current).toBeNull();
+    expect(result.current.offerContinue).toBe(true);
+    // Must not auto-loop /continue from the paused poll.
+    expect(continueHits).toBe(0);
+  });
+
+  it("approve does not no-op while a prior continue is in flight", async () => {
+    const interrupt = {
+      interrupt_id: "irq-block",
+      tier: "step",
+      phase: "review",
+      section_id: "quality_of_earnings",
+      step_id: "draft",
+      content: { draft: "Draft" },
+      allowed_actions: ["approve"],
+    };
+    const nextInterrupt = {
+      ...interrupt,
+      interrupt_id: "irq-after",
+      content: { draft: "After" },
+    };
+
+    let resumeHits = 0;
+    let releaseContinue: (() => void) | null = null;
+    const continueGate = new Promise<void>((resolve) => {
+      releaseContinue = resolve;
+    });
+
+    server.use(
+      http.get("/sessions/t-noblock/status", () =>
+        HttpResponse.json({
+          run_status: "awaiting_approval",
+          audit_status: "passed",
+          current_section_index: 0,
+        })
+      ),
+      http.get("/sessions/t-noblock/state", () =>
+        HttpResponse.json({
+          values: { run_status: "awaiting_approval" },
+          next: [],
+          interrupt,
+          section_state: null,
+        })
+      ),
+      http.post("/sessions/t-noblock/continue", async () => {
+        await continueGate;
+        return sseResponse(
+          `event: interrupt\ndata: ${JSON.stringify(interrupt)}\n\n`
+        );
+      }),
+      http.post("/sessions/t-noblock/resume", async () => {
+        resumeHits += 1;
+        return sseResponse(
+          `event: interrupt\ndata: ${JSON.stringify(nextInterrupt)}\n\n`
+        );
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useRunOrchestrator("t-noblock", { pollMs: 60_000 })
+    );
+    await waitFor(() => expect(result.current.phase).toBe("paused"));
+
+    // Start a hung Continue, then Approve must still POST /resume (abort Continue).
+    act(() => {
+      void result.current.continueFromCheckpoint();
+    });
+    await waitFor(() => expect(result.current.continuing).toBe(true));
+
+    await act(async () => {
+      result.current.resumeRun(
+        { action: "approve", interrupt_id: "irq-block" },
+        interrupt as never
+      );
+    });
+
+    await waitFor(() => expect(resumeHits).toBe(1), { timeout: 3000 });
+    releaseContinue?.();
+  });
+
+  it("approve 409 with no interrupt auto-continues once", async () => {
+    const interrupt = {
+      interrupt_id: "irq-gone",
+      tier: "global",
+      phase: "review",
+      section_id: null,
+      step_id: null,
+      content: { global_plan: { content: "G" } },
+      allowed_actions: ["approve"],
+    };
+    const nextInterrupt = {
+      ...interrupt,
+      interrupt_id: "irq-next",
+      content: { global_plan: { content: "Next" } },
+    };
+
+    let continueHits = 0;
+    let mode: "paused" | "orphaned" | "recovered" = "paused";
+
+    server.use(
+      http.get("/sessions/t-409-orphan/status", () => {
+        if (mode === "orphaned") {
+          return HttpResponse.json({
+            run_status: "generating",
+            audit_status: "passed",
+            current_section_index: 0,
+          });
+        }
+        return HttpResponse.json({
+          run_status: "awaiting_approval",
+          audit_status: "passed",
+          current_section_index: 0,
+        });
+      }),
+      http.get("/sessions/t-409-orphan/state", () => {
+        if (mode === "paused") {
+          return HttpResponse.json({
+            values: { run_status: "awaiting_approval" },
+            next: [],
+            interrupt,
+            section_state: null,
+          });
+        }
+        if (mode === "recovered") {
+          return HttpResponse.json({
+            values: { run_status: "awaiting_approval" },
+            next: [],
+            interrupt: nextInterrupt,
+            section_state: null,
+          });
+        }
+        return HttpResponse.json({
+          values: { run_status: "generating" },
+          next: ["run_section"],
+          interrupt: null,
+          section_state: null,
+        });
+      }),
+      http.post("/sessions/t-409-orphan/resume", () => {
+        mode = "orphaned";
+        return HttpResponse.json(
+          { detail: "No pending interrupt on this thread; use /continue" },
+          { status: 409 }
+        );
+      }),
+      http.post("/sessions/t-409-orphan/continue", async () => {
+        continueHits += 1;
+        mode = "recovered";
+        return sseResponse(
+          `event: interrupt\ndata: ${JSON.stringify(nextInterrupt)}\n\n`
+        );
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useRunOrchestrator("t-409-orphan", { pollMs: 60_000 })
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("paused"));
+
+    await act(async () => {
+      result.current.resumeRun(
+        { action: "approve", interrupt_id: "irq-gone" },
+        interrupt as never
+      );
+    });
+
+    await waitFor(() => expect(continueHits).toBe(1), { timeout: 3000 });
+    await waitFor(() => expect(result.current.phase).toBe("paused"), {
+      timeout: 3000,
+    });
+    expect(result.current.hitl.current?.interrupt_id).toBe("irq-next");
+  });
+
+  it("approve 409 with interrupt present does not continue", async () => {
+    const interrupt = {
+      interrupt_id: "irq-stale",
+      tier: "section",
+      phase: "plan",
+      section_id: "business_overview",
+      step_id: null,
+      content: { section_plan: "Old" },
+      allowed_actions: ["approve"],
+    };
+    const current = {
+      ...interrupt,
+      interrupt_id: "irq-current",
+      content: { section_plan: "Current" },
+    };
+
+    let continueHits = 0;
+
+    server.use(
+      http.get("/sessions/t-409-irq/status", () =>
+        HttpResponse.json({
+          run_status: "awaiting_approval",
+          audit_status: "passed",
+          current_section_index: 0,
+        })
+      ),
+      http.get("/sessions/t-409-irq/state", () =>
+        HttpResponse.json({
+          values: { run_status: "awaiting_approval" },
+          next: [],
+          interrupt: current,
+          section_state: null,
+        })
+      ),
+      http.post("/sessions/t-409-irq/resume", () =>
+        HttpResponse.json(
+          { detail: "Interrupt already answered or stale." },
+          { status: 409 }
+        )
+      ),
+      http.post("/sessions/t-409-irq/continue", async () => {
+        continueHits += 1;
+        return sseResponse("event: done\ndata: {}\n\n");
+      })
+    );
+
+    const { result } = renderHook(() =>
+      useRunOrchestrator("t-409-irq", { pollMs: 60_000 })
+    );
+
+    await waitFor(() => expect(result.current.phase).toBe("paused"));
+
+    await act(async () => {
+      result.current.resumeRun(
+        { action: "approve", interrupt_id: "irq-stale" },
+        interrupt as never
+      );
+    });
+
+    await waitFor(() =>
+      expect(result.current.hitl.current?.interrupt_id).toBe("irq-current")
+    );
+    expect(continueHits).toBe(0);
+    expect(result.current.phase).toBe("paused");
+  });
+
   it("polls server_running until interrupt appears", async () => {
     let ticks = 0;
     server.use(
@@ -250,7 +813,10 @@ describe("useRunOrchestrator", () => {
       http.post("/sessions/t-inst/instruction", async ({ request }) => {
         const body = (await request.json()) as { text: string };
         if (body.text === "missing") {
-          return HttpResponse.json({ detail: "Not Found" }, { status: 404 });
+          return HttpResponse.json(
+            { detail: "Unknown thread — no run state." },
+            { status: 404 }
+          );
         }
         return HttpResponse.json({ ok: true, instruction_count: 2 });
       })
@@ -273,6 +839,6 @@ describe("useRunOrchestrator", () => {
     await act(async () => {
       await result.current.sendInstruction("missing");
     });
-    expect(result.current.instructionError).toMatch(/POST \/instruction missing/i);
+    expect(result.current.instructionError).toMatch(/Unknown session|no run/i);
   });
 });

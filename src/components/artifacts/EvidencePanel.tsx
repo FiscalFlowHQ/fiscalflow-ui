@@ -2,9 +2,9 @@ import type { ClaimItem, SectionState } from "../../types/api";
 import {
   claimRefs,
   claimText,
-  formatJsonBlock,
   liveSectionId,
 } from "./artifactModel";
+import EvidenceBundleView from "./EvidenceBundleView";
 
 export type EvidencePanelProps = {
   sectionState: SectionState | null;
@@ -36,7 +36,7 @@ export default function EvidencePanel({ sectionState, claims }: EvidencePanelPro
               <span className="artifact-pill artifact-pill--live">{liveId}</span>
             ) : null}
           </h3>
-          <pre className="artifact-pre">{formatJsonBlock(bundle)}</pre>
+          <EvidenceBundleView bundle={bundle} />
         </section>
       )}
 

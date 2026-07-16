@@ -117,9 +117,8 @@ Completed 2026-07-14.
 - Continue opens a **new** SSE body with the same fan-out as start/resume.
 
 ### Remaining lifecycle gaps
-- **Live `fiscalflow-api` has no `POST /continue` yet** (only start/resume/cancel in
-  `generation.py`). UI targets the remediated contract; 404 → banner explains gap and falls
-  back to `server_running` messaging. Ship BE continue before acceptance.
-- Live cancel response may omit `was_running` — client already normalizes.
+- **Aligned with `fiscalflow-api` branch `task-12`:** `POST /continue`, cancel
+  `{cancelled, was_running, run_status}`, and resume `interrupt_id` guards are present.
+  A continue `404` means unknown thread (not a missing route).
 - No global offline queue; sticky banner + reconnect assessment only.
 - Cancel uses `window.confirm` — can upgrade to a proper modal later.

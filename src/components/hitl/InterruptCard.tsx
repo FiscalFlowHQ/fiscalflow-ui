@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { InterruptEnvelope, ResumeRequest } from "../../types/api";
+import EvidenceBundleView from "../artifacts/EvidenceBundleView";
 import MarkdownView from "../artifacts/MarkdownView";
 import {
   canAct,
@@ -181,12 +182,14 @@ export default function InterruptCard({
           </div>
         ) : (
           <div className="hitl-review">
-            {payload.outputKey && (
+            {payload.outputKey && payload.outputKey !== "evidence_bundle" && (
               <p className="hitl-card__hint">
                 Output key <code>{payload.outputKey}</code>
               </p>
             )}
-            {editing || typeof payload.value !== "string" ? (
+            {payload.outputKey === "evidence_bundle" && !editing ? (
+              <EvidenceBundleView bundle={payload.value} compact />
+            ) : editing || typeof payload.value !== "string" ? (
               <textarea
                 className="hitl-editor"
                 rows={14}

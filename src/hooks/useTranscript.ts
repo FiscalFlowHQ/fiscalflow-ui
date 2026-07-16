@@ -206,10 +206,32 @@ export function useTranscript(threadId: string): UseTranscriptResult {
   }, []);
 
   const logSystem = useCallback((text: string) => {
-    setEntries((prev) => [
-      ...prev,
-      { id: nextId("system"), kind: "system", text, at: nowIso() },
-    ]);
+    setEntries((prev) => {
+      // Databook ready was spamming on every remount/poll — collapse duplicates.
+      if (
+        text.startsWith("Databook ready") &&
+        prev.slice(-20).some((e) => e.kind === "system" && e.text === text)
+      ) {
+        return prev;
+      }
+      // Collapse identical recovery / decision system lines within the recent window.
+      const recovery =
+        text.includes("continuing from") ||
+        text.includes("Continuing from") ||
+        text.startsWith("Decision submitted") ||
+        text.startsWith("Generation stopped mid-step") ||
+        text.startsWith("No pause left to approve");
+      if (
+        recovery &&
+        prev.slice(-8).some((e) => e.kind === "system" && e.text === text)
+      ) {
+        return prev;
+      }
+      return [
+        ...prev,
+        { id: nextId("system"), kind: "system", text, at: nowIso() },
+      ];
+    });
   }, []);
 
   const logInstruction = useCallback((text: string) => {

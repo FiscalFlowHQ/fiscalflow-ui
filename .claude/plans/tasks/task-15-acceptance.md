@@ -104,17 +104,17 @@ Completed 2026-07-14.
 | 4 | **ready** | Pipeline SSE + orchestrator tests; manual balanced run |
 | 5 | **ready** | HITL card + resume/reject unit coverage; full regenerate+export edit survival = live |
 | 6 | **pass-by-test (export UI)** | Feature-detect + md download unit-tested; live pptx when BE writes `artifacts.pptx` |
-| 7 | **ready / BE drift** | UI continue CTA (task 11); confirm live BE has `POST /continue` |
+| 7 | **aligned** | `POST /continue` live on BE `task-12`; UI CTA ready for live verify |
 | 8 | **ready** | Cancel + 409 paths implemented (task 11); live verify |
 | 9 | **pass-by-test** | Settings store + SettingsPage health/token tests |
 | 10 | **deferred** | Tauri scaffold shipped (task 14); needs local Rust for `tauri:dev` / `tauri:build` |
-| 11 | **ready / BE drift** | Instruction composer + 404 degrade (task 12); live `/instruction` + `instruction_history` |
-| 12 | **partial** | `npm test` + `npm run build` **pass** (109). `tauri build` deferred (no rustc here) |
+| 11 | **aligned** | `POST /instruction` live on BE `task-12`; composer wired; 404 = no run state |
+| 12 | **partial** | `npm test` + `npm run build` **pass**. `tauri build` deferred (no rustc here) |
 
 ### BE gaps to clear before a billed acceptance run
 1. Strip `TESTING-ONLY-ASSUME-VALUES` from BE prompts (blocking item above).
-2. Confirm remediations: `POST /continue`, `POST /instruction`, `interrupt_id`,
-   `section_state`, `metadata.artifacts` on completed runs.
+2. Contract vs `fiscalflow-api` **`task-12`**: `/continue`, `/instruction`, `interrupt_id`,
+   `section_state`, and `metadata.artifacts` are present — no FE gap for those routes.
 3. LibreOffice on API host if PDF acceptance is required.
 
 ### Tracker

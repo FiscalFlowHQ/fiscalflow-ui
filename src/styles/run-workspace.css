@@ -163,20 +163,20 @@
   flex-shrink: 0;
 }
 
-/* Three-column workspace — rail | artifacts | databook/composer/chat */
+/* Three-column workspace — rail | chat (main) | databook/composer/artifacts */
 .run-workspace.run-page__layout--workspace {
-  grid-template-columns: 240px minmax(0, 1.15fr) minmax(320px, 420px);
+  grid-template-columns: 240px minmax(0, 1.45fr) minmax(300px, 400px);
   align-items: start;
   min-height: 0;
   flex: 1;
 }
 
-/* Widen artifacts while reviewing (HITL cards live inline in chat). */
+/* Give chat a bit more room while reviewing (HITL cards live inline in chat). */
 .run-workspace--paused.run-page__layout--workspace {
-  grid-template-columns: 220px minmax(0, 1.4fr) minmax(340px, 440px);
+  grid-template-columns: 220px minmax(0, 1.55fr) minmax(300px, 400px);
 }
 
-.run-workspace--server-running .artifact-panel {
+.run-workspace--server-running .chat-panel--main {
   outline: 1px dashed rgba(77, 195, 255, 0.35);
   outline-offset: -1px;
 }
@@ -187,6 +187,12 @@
   gap: 16px;
   min-width: 0;
   min-height: 0;
+}
+
+.run-workspace__sidebar .artifact-panel {
+  position: static;
+  min-height: 280px;
+  max-height: min(48vh, 520px);
 }
 
 /* —— Chat transcript (task 12) —— */
@@ -200,6 +206,15 @@
   border-radius: 8px;
   background: var(--surface-1, #121820);
   overflow: hidden;
+}
+
+.chat-panel--main {
+  min-height: 420px;
+  max-height: calc(100vh - 140px);
+  position: sticky;
+  top: 12px;
+  border-radius: var(--radius-lg, 8px);
+  background: var(--surface, var(--surface-1, #121820));
 }
 
 .chat-panel__head {
@@ -290,6 +305,75 @@
   border-radius: 0;
 }
 
+.chat-bubble--resolved {
+  border: 1px solid var(--border, #2a3344);
+  background: var(--surface-2, #1a2230);
+}
+
+.chat-resolved__decision {
+  margin: 4px 0 0;
+  font-size: 0.85rem;
+}
+
+.chat-resolved__preview {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgba(120, 140, 170, 0.25);
+  opacity: 0.88;
+  max-height: 140px;
+  overflow: hidden;
+}
+
+.chat-resolved__md {
+  font-size: 0.8rem;
+}
+
+.chat-historical__preview {
+  margin: 4px 0 0;
+  opacity: 0.75;
+  white-space: pre-wrap;
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.chat-bubble--activity {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px dashed rgba(77, 160, 255, 0.45);
+  background: rgba(77, 160, 255, 0.1);
+  position: sticky;
+  bottom: 0;
+}
+
+.chat-bubble--activity p {
+  margin: 0;
+  font-size: 0.85rem;
+}
+
+.chat-activity__pulse {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(77, 160, 255, 0.95);
+  flex-shrink: 0;
+  animation: chat-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes chat-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.85);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .chat-bubble--error {
   border: 1px solid rgba(220, 90, 90, 0.45);
   background: rgba(220, 90, 90, 0.1);
@@ -364,7 +448,7 @@
 @media (max-width: 1280px) {
   .run-workspace.run-page__layout--workspace,
   .run-workspace--paused.run-page__layout--workspace {
-    grid-template-columns: 220px minmax(0, 1fr) minmax(280px, 360px);
+    grid-template-columns: 220px minmax(0, 1.25fr) minmax(280px, 360px);
   }
 }
 
@@ -374,20 +458,20 @@
     grid-template-columns: 240px minmax(0, 1fr);
   }
 
-  .run-workspace.run-page__layout--workspace .artifact-panel {
-    grid-column: 1 / -1;
-    order: 3;
+  .run-workspace.run-page__layout--workspace .chat-panel--main {
+    grid-column: 2;
+    grid-row: 1;
     position: static;
-    max-height: none;
+    max-height: min(55vh, 560px);
   }
 
   .run-workspace__sidebar {
-    grid-column: 2;
-    grid-row: 1;
+    grid-column: 1 / -1;
+    order: 3;
   }
 
-  .chat-panel {
-    max-height: min(40vh, 420px);
+  .run-workspace__sidebar .artifact-panel {
+    max-height: none;
   }
 }
 
@@ -398,7 +482,7 @@
   }
 
   .run-workspace__sidebar,
-  .run-workspace.run-page__layout--workspace .artifact-panel {
+  .run-workspace.run-page__layout--workspace .chat-panel--main {
     grid-column: auto;
     grid-row: auto;
     order: unset;
@@ -410,8 +494,10 @@
     width: 100%;
   }
 
-  .chat-panel {
+  .chat-panel,
+  .chat-panel--main {
     max-height: none;
-    min-height: 320px;
+    min-height: 360px;
+    position: static;
   }
 }

@@ -2,8 +2,14 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
 import { setupServer } from "msw/node";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import RunComposer from "./RunComposer";
+
+function renderComposer(ui: ReactElement) {
+  return render(<MemoryRouter initialEntries={["/run/t-1"]}>{ui}</MemoryRouter>);
+}
 
 const server = setupServer(
   http.get("/sections", () =>
@@ -39,7 +45,7 @@ afterAll(() => server.close());
 
 describe("RunComposer", () => {
   it("disables Start when databook is not ready", async () => {
-    render(
+    renderComposer(
       <RunComposer
         databookReady={false}
         documentRef={null}
@@ -59,7 +65,7 @@ describe("RunComposer", () => {
   it("starts with selected sections, document_ref, and balanced policy", async () => {
     const user = userEvent.setup();
     const onStart = vi.fn();
-    render(
+    renderComposer(
       <RunComposer
         databookReady
         documentRef="doc-1"
@@ -83,6 +89,37 @@ describe("RunComposer", () => {
         selected_sections: ["quality_of_earnings"],
         document_ref: "doc-1",
         approval_policy: "balanced",
+        auto_approve_plans: false,
+      })
+    );
+  });
+
+  it("sends auto_approve_plans when composer checkbox is checked", async () => {
+    const user = userEvent.setup();
+    const onStart = vi.fn();
+    renderComposer(
+      <RunComposer
+        databookReady
+        documentRef="doc-1"
+        locked={false}
+        starting={false}
+        startError={null}
+        onStart={onStart}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Quality of Earnings")).toBeInTheDocument();
+    });
+
+    await user.click(
+      screen.getByRole("checkbox", { name: /auto-approve plan gates/i })
+    );
+    await user.click(screen.getByRole("button", { name: /start generation/i }));
+
+    expect(onStart).toHaveBeenCalledWith(
+      expect.objectContaining({
+        auto_approve_plans: true,
       })
     );
   });
@@ -103,7 +140,7 @@ describe("RunComposer", () => {
       )
     );
 
-    render(
+    renderComposer(
       <RunComposer
         databookReady
         documentRef="doc-1"

@@ -7,9 +7,12 @@ import { ApiError, ensureOk, requestBlob, requestJson } from "./http";
 import type {
   CancelResponse,
   DocumentFormat,
+  DocumentSkipAuditResponse,
   DocumentStatusResponse,
   DocumentUploadResponse,
   HealthResponse,
+  HitlSettingsRequest,
+  HitlSettingsResponse,
   InstructionResponse,
   ProviderSettingsResponse,
   ProviderSettingsUpdate,
@@ -45,6 +48,14 @@ export function getDocumentStatus(documentRef: string): Promise<DocumentStatusRe
   );
 }
 
+/** Skip unresolved audit findings and continue RAG ingest. */
+export function skipAuditAndIngest(documentRef: string): Promise<DocumentSkipAuditResponse> {
+  return requestJson<DocumentSkipAuditResponse>(
+    `/documents/${encodeURIComponent(documentRef)}/skip-audit`,
+    { method: "POST" }
+  );
+}
+
 export function getSessionState(threadId: string): Promise<SessionStateResponse> {
   return requestJson<SessionStateResponse>(
     `/sessions/${encodeURIComponent(threadId)}/state`
@@ -52,7 +63,6 @@ export function getSessionState(threadId: string): Promise<SessionStateResponse>
     values: raw.values ?? {},
     next: raw.next ?? [],
     interrupt: raw.interrupt ?? null,
-    // Live BE may omit section_state until remediation lands.
     section_state: raw.section_state ?? null,
   }));
 }
@@ -76,6 +86,19 @@ export function sendInstruction(
   );
 }
 
+export function patchHitlSettings(
+  threadId: string,
+  body: HitlSettingsRequest
+): Promise<HitlSettingsResponse> {
+  return requestJson<HitlSettingsResponse>(
+    `/sessions/${encodeURIComponent(threadId)}/hitl`,
+    {
+      method: "PATCH",
+      body: JSON.stringify(body),
+    }
+  );
+}
+
 export function cancelRun(threadId: string): Promise<CancelResponse> {
   return requestJson<{
     cancelled: boolean;
@@ -85,7 +108,6 @@ export function cancelRun(threadId: string): Promise<CancelResponse> {
     method: "POST",
   }).then((raw) => ({
     cancelled: raw.cancelled,
-    // Live BE (pre-remediation) omits was_running; treat cancelled≈was_running.
     was_running: raw.was_running ?? raw.cancelled,
     run_status: "cancelled",
   }));

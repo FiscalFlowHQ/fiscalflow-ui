@@ -5,6 +5,10 @@ import {
   createInitialPipelineState,
   type PipelineState,
 } from "../components/pipeline/pipelineModel";
+import {
+  hydratePipelineState,
+  type PipelineHydrateInput,
+} from "../components/pipeline/pipelineHydrate";
 import { pipelineReducer } from "../components/pipeline/pipelineReducer";
 
 const STATUS_POLL_MS = 4000;
@@ -18,6 +22,8 @@ export type UsePipelineProgressOptions = {
 export type UsePipelineProgressResult = {
   state: PipelineState;
   reset: (selectedSections: string[]) => void;
+  /** Rebuild rail from GET /state checkpoint (reconnect / Continue). */
+  hydrate: (input: PipelineHydrateInput) => void;
   applyEvent: (ev: SseEvent) => void;
 };
 
@@ -35,6 +41,11 @@ export function usePipelineProgress(
   const reset = useCallback((selectedSections: string[]) => {
     runningRef.current = true;
     dispatch({ type: "reset", selectedSections });
+  }, []);
+
+  const hydrate = useCallback((input: PipelineHydrateInput) => {
+    runningRef.current = true;
+    dispatch({ type: "hydrate", input });
   }, []);
 
   const applyEvent = useCallback((ev: SseEvent) => {
@@ -72,5 +83,8 @@ export function usePipelineProgress(
     };
   }, [pollStatus, threadId]);
 
-  return { state, reset, applyEvent };
+  return { state, reset, hydrate, applyEvent };
 }
+
+export type { PipelineHydrateInput };
+export { hydratePipelineState };

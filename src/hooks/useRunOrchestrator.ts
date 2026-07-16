@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   cancelRun as apiCancelRun,
+  getDocumentStatus,
   sendInstruction as apiSendInstruction,
 } from "../api/fiscalflow";
 import { ApiError } from "../api/http";
@@ -31,9 +32,11 @@ import type {
   InterruptEnvelope,
   ResumeRequest,
   RunStatus,
+  SessionStateResponse,
   StartGenerationRequest,
 } from "../types/api";
 import type { SseEvent } from "../types/sse";
+import type { PipelineHydrateInput } from "./usePipelineProgress";
 
 /** Poll interval for `server_running` recovery. */
 export const ORCHESTRATOR_POLL_MS = 4000;
@@ -51,6 +54,8 @@ export type OrchestratorPhase =
 
 export type UseRunOrchestratorResult = {
   phase: OrchestratorPhase;
+  /** True after local session + reconnect/databook restore finished. */
+  hydrated: boolean;
   runStatus: RunStatus | string | null;
   banner: string | null;
   bannerTone: "info" | "error" | "warn";
@@ -124,6 +129,12 @@ export function useRunOrchestrator(
   const startInFlightRef = useRef(false);
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
+
+  /** Keep phaseRef in sync immediately so awaiters after settle see the new phase. */
+  const setPhaseNow = useCallback((next: OrchestratorPhase) => {
+    phaseRef.current = next;
+    setPhase(next);
+  }, []);
   const historyLenRef = useRef(0);
 
   const pipeline = usePipelineProgress({ threadId, pollStatus: true });
@@ -145,10 +156,19 @@ export function useRunOrchestrator(
   const seedArtifactInterruptRef = useRef<(e: InterruptEnvelope) => void>(() => {});
   const clearHitlRef = useRef<() => void>(() => {});
   const abortHitlRef = useRef<() => void>(() => {});
+  const syncBulkApproveRef = useRef<(value: boolean) => void>(() => {});
   const resetPipelineRef = useRef<(sections: string[]) => void>(() => {});
+  const hydratePipelineRef = useRef<(input: PipelineHydrateInput) => void>(() => {});
   const resetArtifactsRef = useRef<() => void>(() => {});
   const refreshArtifactsRef = useRef<() => Promise<void>>(async () => {});
   const loadReportRef = useRef<() => Promise<void>>(async () => {});
+  const settleExternalStreamRef = useRef<() => Promise<void>>(async () => {});
+  const applyReconnectSnapshotRef = useRef<
+    (opts?: { fromPoll?: boolean }) => Promise<ReconnectDecision>
+  >(async () => ({ kind: "idle", runStatus: null }));
+  const databookLoggedRef = useRef<string | null>(null);
+  const continueFromCheckpointRef = useRef<() => Promise<void>>(async () => {});
+
 
   const applySessionPatch = useCallback(
     (ev: SseEvent) => {
@@ -179,21 +199,21 @@ export function useRunOrchestrator(
         pushInterruptRef.current(ev.envelope);
         seedArtifactInterruptRef.current(ev.envelope);
         sseLiveRef.current = false;
-        setPhase("paused");
+        setPhaseNow("paused");
         setRunStatus("awaiting_approval");
         setBanner(null);
         setOfferContinue(false);
         setStreamError(null);
       } else if (ev.type === "done") {
         sseLiveRef.current = false;
-        setPhase("completed");
+        setPhaseNow("completed");
         setRunStatus("completed");
         setBanner(null);
         setOfferContinue(false);
         setStreamError(null);
       } else if (ev.type === "error") {
         sseLiveRef.current = false;
-        setPhase("failed");
+        setPhaseNow("failed");
         setRunStatus("failed");
         setOfferContinue(false);
         setStreamError(ev.message);
@@ -208,12 +228,12 @@ export function useRunOrchestrator(
         });
       } else if (ev.type === "step" || ev.type === "token") {
         if (sseLiveRef.current) {
-          setPhase("streaming");
+          setPhaseNow("streaming");
           setOfferContinue(false);
         }
       }
     },
-    [applySessionPatch, pipeline, toast]
+    [applySessionPatch, pipeline, setPhaseNow, toast]
   );
 
   const startHook = useStartRun({
@@ -226,12 +246,17 @@ export function useRunOrchestrator(
     onBeginStream: () => {
       sseLiveRef.current = true;
       beginExternalStreamRef.current();
-      setPhase("streaming");
+      setPhaseNow("streaming");
       setBanner(null);
       setOfferContinue(false);
+      transcriptLogSystemRef.current("Decision submitted — generation resuming…");
     },
     onStreamEvent: (ev) => observeStreamEventRef.current(ev),
     onEvent: onSseEvent,
+    onStreamSettled: () => settleExternalStreamRef.current(),
+    onOrphanedCheckpoint: () => {
+      clearHitlRef.current();
+    },
   });
 
   const reconnect = useSessionReconnect({
@@ -240,9 +265,10 @@ export function useRunOrchestrator(
     onBeginStream: () => {
       sseLiveRef.current = true;
       beginExternalStreamRef.current();
-      setPhase("streaming");
+      setPhaseNow("streaming");
       setBanner(null);
       setOfferContinue(false);
+      // Activity strip covers Continue UX — avoid duplicate transcript spam.
     },
     onStreamEvent: (ev) => observeStreamEventRef.current(ev),
   });
@@ -250,11 +276,13 @@ export function useRunOrchestrator(
   pushInterruptRef.current = hitl.pushInterrupt;
   clearHitlRef.current = hitl.clearStack;
   abortHitlRef.current = hitl.abort;
+  syncBulkApproveRef.current = hitl.syncBulkApprovePlans;
   beginExternalStreamRef.current = startHook.beginExternalStream;
   observeStreamEventRef.current = startHook.observeStreamEvent;
   applyArtifactEventRef.current = artifacts.applyEvent;
   seedArtifactInterruptRef.current = artifacts.seedFromInterrupt;
   resetPipelineRef.current = pipeline.reset;
+  hydratePipelineRef.current = pipeline.hydrate;
   resetArtifactsRef.current = artifacts.reset;
   refreshArtifactsRef.current = artifacts.refreshState;
   loadReportRef.current = artifacts.loadReport;
@@ -284,9 +312,44 @@ export function useRunOrchestrator(
   }, [hitl.history]);
 
   const applyDecision = useCallback(
-    (decision: ReconnectDecision, stateSections: string[]) => {
+    (decision: ReconnectDecision, snap: SessionStateResponse) => {
+      const stateSections = Array.isArray(snap.values?.selected_sections)
+        ? snap.values.selected_sections.filter((s): s is string => typeof s === "string")
+        : [];
+
       if (stateSections.length) {
-        resetPipelineRef.current(stateSections);
+        const completedRaw = snap.values?.completed_sections;
+        const completedSectionIds = Array.isArray(completedRaw)
+          ? completedRaw
+              .map((s) =>
+                s && typeof s === "object" && typeof (s as { id?: unknown }).id === "string"
+                  ? (s as { id: string }).id
+                  : null
+              )
+              .filter((id): id is string => !!id)
+          : [];
+        const stepTrace = Array.isArray(snap.section_state?.step_trace)
+          ? snap.section_state.step_trace.filter((id): id is string => typeof id === "string")
+          : [];
+        const interrupt =
+          decision.kind === "paused"
+            ? decision.interrupt
+            : snap.interrupt ?? null;
+
+        hydratePipelineRef.current({
+          selectedSections: stateSections,
+          currentSectionIndex:
+            typeof snap.values?.current_section_index === "number"
+              ? snap.values.current_section_index
+              : null,
+          stepTrace,
+          interrupt,
+          next: Array.isArray(snap.next) ? snap.next : [],
+          runStatus:
+            decision.runStatus ??
+            (typeof snap.values?.run_status === "string" ? snap.values.run_status : null),
+          completedSectionIds,
+        });
       }
 
       switch (decision.kind) {
@@ -300,7 +363,16 @@ export function useRunOrchestrator(
               resumeInterruptId(decision.interrupt),
             envelope: decision.interrupt,
           });
-          setPhase("paused");
+          {
+            const meta = snap.values?.metadata;
+            if (meta && typeof meta === "object") {
+              const flag = (meta as { auto_approve_plans?: unknown }).auto_approve_plans;
+              if (typeof flag === "boolean") {
+                syncBulkApproveRef.current(flag);
+              }
+            }
+          }
+          setPhaseNow("paused");
           setRunStatus(decision.runStatus);
           setBanner(null);
           setOfferContinue(false);
@@ -310,7 +382,9 @@ export function useRunOrchestrator(
           });
           break;
         case "needs_continue":
-          setPhase("needs_continue");
+          // Stale pause cards must not survive an orphan mid-node — Approve would 409.
+          clearHitlRef.current();
+          setPhaseNow("needs_continue");
           setRunStatus(decision.runStatus);
           setBanner(decision.message);
           setBannerTone("warn");
@@ -321,7 +395,8 @@ export function useRunOrchestrator(
           });
           break;
         case "completed":
-          setPhase("completed");
+          clearHitlRef.current();
+          setPhaseNow("completed");
           setRunStatus("completed");
           setBanner(null);
           setOfferContinue(false);
@@ -329,7 +404,8 @@ export function useRunOrchestrator(
           void loadReportRef.current();
           break;
         case "failed":
-          setPhase("failed");
+          clearHitlRef.current();
+          setPhaseNow("failed");
           setRunStatus("failed");
           setOfferContinue(false);
           setStreamError(decision.message);
@@ -338,14 +414,16 @@ export function useRunOrchestrator(
           patchSession(threadId, { paused: false, lastRunStatus: "failed" });
           break;
         case "cancelled":
-          setPhase("cancelled");
+          clearHitlRef.current();
+          setPhaseNow("cancelled");
           setRunStatus("cancelled");
           setBanner(null);
           setOfferContinue(false);
           patchSession(threadId, { paused: false, lastRunStatus: "cancelled" });
           break;
         case "server_running":
-          setPhase("server_running");
+          clearHitlRef.current();
+          setPhaseNow("server_running");
           setRunStatus(decision.runStatus);
           setBanner(decision.message);
           setBannerTone("info");
@@ -356,6 +434,7 @@ export function useRunOrchestrator(
           });
           break;
         case "idle":
+          clearHitlRef.current();
           setOfferContinue(false);
           setBanner(null);
           patchSession(threadId, {
@@ -365,7 +444,7 @@ export function useRunOrchestrator(
           break;
       }
     },
-    [threadId]
+    [setPhaseNow, threadId]
   );
 
   const applyReconnectSnapshot = useCallback(
@@ -374,22 +453,76 @@ export function useRunOrchestrator(
       setRunStatus(snap.status.run_status ?? null);
       await refreshArtifactsRef.current();
 
-      const sections = Array.isArray(snap.state.values?.selected_sections)
-        ? snap.state.values.selected_sections.filter((s): s is string => typeof s === "string")
-        : [];
-
       if (opts?.fromPoll && snap.decision.kind === "idle") {
         setBanner(null);
         return snap.decision;
       }
 
       if (!opts?.fromPoll || snap.decision.kind !== "idle") {
-        applyDecision(snap.decision, sections);
+        applyDecision(snap.decision, snap.state);
       }
       return snap.decision;
     },
     [applyDecision, threadId]
   );
+
+  applyReconnectSnapshotRef.current = applyReconnectSnapshot;
+
+  /**
+   * After start/resume/continue SSE ends: reclassify from GET /state.
+   * Skip no-op re-applies when already paused on an interrupt (avoids layout thrash).
+   * Retry once when we just paused via SSE but GET still looks orphaned (checkpoint race).
+   */
+  const settleExternalStream = useCallback(async () => {
+    const current = phaseRef.current;
+    if (
+      current === "completed" ||
+      current === "failed" ||
+      current === "cancelled"
+    ) {
+      sseLiveRef.current = false;
+      return;
+    }
+
+    sseLiveRef.current = false;
+    try {
+      let snap = await fetchReconnectSnapshot(threadId);
+      setRunStatus(snap.status.run_status ?? null);
+      await refreshArtifactsRef.current();
+
+      // Interrupt arrived on SSE but checkpoint may lag a beat — don't wipe the card.
+      if (current === "paused" && snap.decision.kind === "needs_continue") {
+        await new Promise((r) => setTimeout(r, 200));
+        snap = await fetchReconnectSnapshot(threadId);
+        setRunStatus(snap.status.run_status ?? null);
+      }
+
+      if (snap.decision.kind === "paused" && current === "paused") {
+        // Pause already on screen from the SSE interrupt — avoid re-hydrate flicker.
+        return;
+      }
+
+      // SSE showed a pause but GET still has no interrupt after retry: keep the card
+      // rather than flashing back to the Continue banner (checkpoint race).
+      if (current === "paused" && snap.decision.kind === "needs_continue") {
+        setOfferContinue(true);
+        setBanner(
+          "Run may still be catching up — try Approve on the card, or Continue if Approve fails."
+        );
+        setBannerTone("warn");
+        return;
+      }
+
+      applyDecision(snap.decision, snap.state);
+    } catch {
+      setPhaseNow("failed");
+      setStreamError("Stream ended unexpectedly — could not refresh session state.");
+      setBanner("Stream ended unexpectedly — could not refresh session state.");
+      setBannerTone("error");
+    }
+  }, [applyDecision, setPhaseNow, threadId]);
+
+  settleExternalStreamRef.current = settleExternalStream;
 
   useEffect(() => {
     if (!threadId) return;
@@ -397,6 +530,7 @@ export function useRunOrchestrator(
     let cancelled = false;
     sseLiveRef.current = false;
     startInFlightRef.current = false;
+    databookLoggedRef.current = null;
     setHydrated(false);
     setBanner(null);
     setOfferContinue(false);
@@ -404,10 +538,11 @@ export function useRunOrchestrator(
     reconnect.abortContinue();
 
     const existing = loadSessions().find((s) => s.threadId === threadId);
+    const restoredRef = existing?.documentRef ?? null;
     if (existing) {
       touchOpened(threadId);
       setSessionTitle(existing.title);
-      setDocumentRefState(existing.documentRef ?? null);
+      setDocumentRefState(restoredRef);
     } else {
       const created = createLocalSession(threadId);
       upsertSession(created);
@@ -424,6 +559,18 @@ export function useRunOrchestrator(
 
     void (async () => {
       try {
+        // Re-verify a previously ingested databook so Start unlocks after navigation.
+        if (restoredRef && !cancelled) {
+          try {
+            const doc = await getDocumentStatus(restoredRef);
+            if (!cancelled && doc.status === "ready") {
+              setDatabookReadyState(true);
+              setDocumentRefState(restoredRef);
+            }
+          } catch {
+            /* DatabookPanel will keep polling / show failure */
+          }
+        }
         if (cancelled) return;
         await applyReconnectSnapshot();
       } catch (err) {
@@ -433,14 +580,8 @@ export function useRunOrchestrator(
             console.debug("[orchestrator] reconnect check failed", err);
           }
         }
-        setPhase((prev) =>
-          prev === "streaming" ||
-          prev === "paused" ||
-          prev === "server_running" ||
-          prev === "needs_continue"
-            ? prev
-            : "no_document"
-        );
+        // 404/400 = no generation run yet (ingest-only session). Do not force
+        // no_document — databook readiness drives the composer gate.
       } finally {
         if (!cancelled) setHydrated(true);
       }
@@ -477,6 +618,44 @@ export function useRunOrchestrator(
       clearInterval(id);
     };
   }, [phase, threadId, applyReconnectSnapshot, pollMs]);
+
+  // While showing a pause card, periodically verify the server still has that interrupt.
+  // If the pause is gone, clear the ghost card and offer Continue — never auto-POST
+  // /continue from this poll (that looped and flickered the whole workspace).
+  useEffect(() => {
+    if (phase !== "paused" || !threadId) return;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || sseLiveRef.current) return;
+      try {
+        const snap = await fetchReconnectSnapshot(threadId);
+        if (cancelled) return;
+        if (snap.decision.kind === "paused") {
+          const meta = snap.state.values?.metadata;
+          if (meta && typeof meta === "object") {
+            const flag = (meta as { auto_approve_plans?: unknown }).auto_approve_plans;
+            if (typeof flag === "boolean") {
+              syncBulkApproveRef.current(flag);
+            }
+          }
+          return;
+        }
+        applyDecision(snap.decision, snap.state);
+      } catch {
+        /* soft */
+      }
+    };
+
+    const id = window.setInterval(() => {
+      void tick();
+    }, Math.min(pollMs, 5000));
+    void tick();
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [phase, threadId, applyDecision, pollMs]);
 
   useEffect(() => {
     if (!hydrated) return;
@@ -520,11 +699,16 @@ export function useRunOrchestrator(
         setDocumentRefState(ref);
         patchSession(threadId, { documentRef: ref });
       }
-      if (ready) {
-        transcriptLogSystemRef.current(
-          ref ? `Databook ready (${ref}).` : "Databook ready."
-        );
+      if (!ready) {
+        databookLoggedRef.current = null;
+        return;
       }
+      const key = ref || "ready";
+      if (databookLoggedRef.current === key) return;
+      databookLoggedRef.current = key;
+      transcriptLogSystemRef.current(
+        ref ? `Databook ready (${ref}).` : "Databook ready."
+      );
     },
     [threadId]
   );
@@ -533,16 +717,23 @@ export function useRunOrchestrator(
   startErrorRef.current = startHook.error;
 
   const continueFromCheckpoint = useCallback(async () => {
-    if (reconnect.continuing || sseLiveRef.current) return;
+    if (reconnect.continuing) return;
     reconnect.clearContinueError();
+    // Stale live flag from a dead resume must not block Continue forever.
+    sseLiveRef.current = false;
+    setOfferContinue(false);
     const result = await reconnect.continueFromCheckpoint();
+    await settleExternalStream();
     if (!result.ok && result.error) {
-      setPhase("server_running");
       setBannerTone("warn");
       setBanner(result.error);
-      setOfferContinue(false);
+      if (phaseRef.current === "needs_continue") {
+        setOfferContinue(true);
+      }
     }
-  }, [reconnect]);
+  }, [reconnect, settleExternalStream]);
+
+  continueFromCheckpointRef.current = continueFromCheckpoint;
 
   const startRun = useCallback(
     async (body: StartGenerationRequest) => {
@@ -561,13 +752,14 @@ export function useRunOrchestrator(
       sseLiveRef.current = true;
       historyLenRef.current = 0;
       clearHitlRef.current();
+      syncBulkApproveRef.current(Boolean(body.auto_approve_plans));
       resetArtifactsRef.current();
       resetPipelineRef.current(body.selected_sections ?? []);
       setBanner(null);
       setOfferContinue(false);
       setStreamError(null);
       setInstructionError(null);
-      setPhase("streaming");
+      setPhaseNow("streaming");
       setRunStatus("generating");
       transcriptLogSystemRef.current("Run started.");
 
@@ -597,10 +789,19 @@ export function useRunOrchestrator(
               } catch {
                 setPhase("failed");
               }
-            } else {
+            } else if (errMsg) {
               setPhase("failed");
+            } else {
+              // Stream closed without interrupt/done/error — recover like resume.
+              try {
+                await applyReconnectSnapshot();
+              } catch {
+                setPhase("failed");
+              }
             }
           }
+        } else {
+          sseLiveRef.current = false;
         }
       }
     },
@@ -609,10 +810,49 @@ export function useRunOrchestrator(
 
   const resumeRun = useCallback(
     (request: ResumeRequest, envelope: InterruptEnvelope) => {
-      if (hitl.resuming || startInFlightRef.current || reconnect.continuing) return;
-      void hitl.resume(request, { envelope });
+      // Never silently ignore Approve — a stuck Continue flag used to make the
+      // button look dead (no "Resuming…") while the card was already stale.
+      if (startInFlightRef.current) return;
+      if (reconnect.continuing) {
+        reconnect.abortContinue();
+      }
+
+      void (async () => {
+        const result = await hitl.resume(request, { envelope });
+
+        // Proven 409 orphan — continue even if phase is still "paused" (resume never
+        // opened a stream, so settle may have early-returned).
+        if (result.orphaned) {
+          transcriptLogSystemRef.current(
+            "No pause left to approve — continuing from the last checkpoint…"
+          );
+          await continueFromCheckpointRef.current();
+          return;
+        }
+
+        // Settle already ran inside resume finally — trust phase, do not re-fetch
+        // with the broad next&&!interrupt heuristic (false orphan mid-run).
+        const phase = phaseRef.current;
+        if (
+          phase === "paused" ||
+          phase === "streaming" ||
+          phase === "completed" ||
+          phase === "failed" ||
+          phase === "cancelled" ||
+          phase === "server_running"
+        ) {
+          return;
+        }
+
+        if (phase !== "needs_continue") return;
+
+        transcriptLogSystemRef.current(
+          "Generation stopped mid-step — continuing from checkpoint…"
+        );
+        await continueFromCheckpointRef.current();
+      })();
     },
-    [hitl, reconnect.continuing]
+    [hitl, reconnect]
   );
 
   const sendInstruction = useCallback(
@@ -628,7 +868,8 @@ export function useRunOrchestrator(
         const message =
           err instanceof ApiError
             ? err.status === 404
-              ? "Mid-run instructions are not available on this API build yet (POST /instruction missing)."
+              ? err.detail ||
+                "Unknown session — mid-run instructions need an existing run on this thread."
               : err.detail
             : err instanceof Error
               ? err.message
@@ -725,6 +966,7 @@ export function useRunOrchestrator(
 
   return {
     phase,
+    hydrated,
     runStatus,
     banner,
     bannerTone,

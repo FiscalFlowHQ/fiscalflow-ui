@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import {
   ACCEPTED_DATABOOK_EXTENSIONS,
   INGESTION_POLL_MS,
@@ -9,12 +10,15 @@ import { loadSettings } from "../../stores/settingsStore";
 
 const ACCEPT_ATTR = ACCEPTED_DATABOOK_EXTENSIONS.join(",");
 
+/** Default path skips ExcelAuditor (FISCALFLOW_SKIP_AUDIT) → queued → ingest → ready. */
 const STEPS: { id: string; label: string; match: string[] }[] = [
   { id: "uploaded", label: "Queued", match: ["uploaded"] },
-  { id: "auditing", label: "Auditing workbook…", match: ["auditing"] },
-  { id: "ingesting", label: "Extracting & indexing…", match: ["ingesting"] },
+  { id: "ingesting", label: "Extracting & indexing…", match: ["ingesting", "auditing"] },
   { id: "ready", label: "Ready", match: ["ready"] },
 ];
+
+const SKIP_TOOLTIP =
+  "Errors are not fully resolved. Skipping may reduce extraction quality and affect the final report.";
 
 function truncateRef(ref: string): string {
   if (ref.length <= 28) return ref;
@@ -29,9 +33,9 @@ function glyph(kind: "todo" | "active" | "done" | "failed"): string {
 }
 
 function kindsForStatus(status: string | null): Array<"todo" | "active" | "done" | "failed"> {
-  if (!status) return ["todo", "todo", "todo", "todo"];
+  if (!status) return ["todo", "todo", "todo"];
   if (status === "failed") {
-    return ["todo", "todo", "todo", "failed"];
+    return ["todo", "todo", "failed"];
   }
   const active = STEPS.findIndex((s) => s.match.includes(status));
   return STEPS.map((_, idx) => {
@@ -40,6 +44,17 @@ function kindsForStatus(status: string | null): Array<"todo" | "active" | "done"
     if (idx === active) return status === "ready" ? "done" : "active";
     return "todo";
   });
+}
+
+function formatEta(seconds: number | null): string | null {
+  if (seconds == null || seconds < 0) return null;
+  if (seconds < 60) return `~${seconds}s remaining`;
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  if (mins < 60) return secs > 0 ? `~${mins}m ${secs}s remaining` : `~${mins}m remaining`;
+  const hours = Math.floor(mins / 60);
+  const remMins = mins % 60;
+  return `~${hours}h ${remMins}m remaining`;
 }
 
 export type DatabookPanelProps = {
@@ -82,7 +97,7 @@ export default function DatabookPanel({
   );
 
   const chooseFile = useCallback(async () => {
-    if (ingestion.uploading) return;
+    if (ingestion.uploading || ingestion.skipping) return;
     if (isTauri()) {
       try {
         const file = await pickDatabookFile();
@@ -98,6 +113,22 @@ export default function DatabookPanel({
   const kinds = kindsForStatus(ingestion.status);
   const showStepper = Boolean(ingestion.status) || ingestion.uploading;
   const failed = ingestion.phase === "failed";
+  const inProgress =
+    ingestion.uploading ||
+    ingestion.status === "uploaded" ||
+    ingestion.status === "auditing" ||
+    ingestion.status === "ingesting";
+  const showProgressBar =
+    inProgress &&
+    (ingestion.progressPct != null ||
+      Boolean(ingestion.progressMessage) ||
+      ingestion.uploading);
+  const pct = Math.max(
+    0,
+    Math.min(100, ingestion.progressPct ?? (ingestion.uploading ? 2 : 0))
+  );
+  const etaLabel = formatEta(ingestion.etaSeconds);
+  const showAuditReview = Boolean(ingestion.auditId && failed);
 
   return (
     <section className="databook-panel" aria-label="Databook">
@@ -105,6 +136,11 @@ export default function DatabookPanel({
         <h2 className="databook-panel__title">Databook</h2>
         {ingestion.ready && (
           <span className="status-chip status-chip--complete">Ready for generation</span>
+        )}
+        {ingestion.auditStatus === "skipped" && ingestion.ready && (
+          <span className="status-chip status-chip--warn" title={SKIP_TOOLTIP}>
+            Audit skipped
+          </span>
         )}
       </header>
 
@@ -138,7 +174,7 @@ export default function DatabookPanel({
         <button
           type="button"
           className="btn-secondary"
-          disabled={ingestion.uploading}
+          disabled={ingestion.uploading || ingestion.skipping || inProgress}
           onClick={() => {
             void chooseFile();
           }}
@@ -172,7 +208,7 @@ export default function DatabookPanel({
               <code>{truncateRef(ingestion.documentRef)}</code>
             </p>
           )}
-          {ingestion.auditStatus && (
+          {ingestion.auditStatus && ingestion.auditStatus !== "passed" && (
             <p>
               <span className="databook-meta__label">Audit</span> {ingestion.auditStatus}
             </p>
@@ -183,7 +219,7 @@ export default function DatabookPanel({
       {showStepper && (
         <ol className="databook-stepper" aria-label="Ingestion progress">
           {STEPS.map((step, idx) => {
-            const kind = failed && idx === 3 ? "failed" : kinds[idx];
+            const kind = failed && idx === 2 ? "failed" : kinds[idx];
             const label = kind === "failed" ? "Failed" : step.label;
             return (
               <li
@@ -201,19 +237,68 @@ export default function DatabookPanel({
         </ol>
       )}
 
+      {showProgressBar && (
+        <div
+          className="databook-progress"
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={pct}
+          aria-label="Ingestion progress"
+        >
+          <div className="databook-progress__track">
+            <div className="databook-progress__fill" style={{ width: `${pct}%` }} />
+          </div>
+          <div className="databook-progress__meta">
+            <span className="databook-progress__pct">{pct}%</span>
+            {etaLabel && <span className="databook-progress__eta">{etaLabel}</span>}
+          </div>
+          <p className="databook-progress__task">
+            {ingestion.progressMessage ??
+              (ingestion.uploading
+                ? "Uploading workbook…"
+                : "Extracting & indexing…")}
+          </p>
+        </div>
+      )}
+
       {failed && (
         <div className="databook-error" role="alert">
           <p>{ingestion.error ?? "Ingestion failed."}</p>
-          <button
-            type="button"
-            className="btn-secondary"
-            onClick={() => {
-              ingestion.resetForRetry();
-              onReadyChange?.(false, null);
-            }}
-          >
-            Try again
-          </button>
+          <div className="databook-error__actions">
+            {showAuditReview && (
+              <>
+                <Link
+                  className="btn-primary"
+                  to={`/review/${encodeURIComponent(ingestion.auditId!)}?return=${encodeURIComponent(`/run/${threadId}`)}`}
+                >
+                  Review errors
+                </Link>
+                <button
+                  type="button"
+                  className="btn-secondary databook-skip-btn"
+                  title={SKIP_TOOLTIP}
+                  disabled={ingestion.skipping}
+                  onClick={() => {
+                    void ingestion.skipAudit();
+                  }}
+                >
+                  {ingestion.skipping ? "Skipping…" : "Skip & ingest"}
+                </button>
+              </>
+            )}
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() => {
+                ingestion.resetForRetry();
+                onReadyChange?.(false, null);
+              }}
+            >
+              Try again
+            </button>
+          </div>
+          {showAuditReview && <p className="databook-skip-hint">{SKIP_TOOLTIP}</p>}
         </div>
       )}
     </section>

@@ -112,9 +112,9 @@ Completed 2026-07-14.
   orchestrator `sendInstruction` success + 404 messaging. **99** tests green; build green.
 
 ### BE drift
-- Live API may still lack `POST /sessions/{id}/instruction` (start-time `instruction` only).
-  UI keeps the composer enabled and surfaces a clear 404 toast / composer error —
-  does not pretend the instruction was stored.
+- **Cleared vs `fiscalflow-api` branch `task-12`:** `POST /sessions/{id}/instruction`
+  is live (`add_instruction` in `sessions.py`). A `404` means the thread has no run
+  state yet (not “endpoint missing”). Composer + 404 handling stay for that case.
 - Instruction is **not** free-form LLM chat — it appends to `instruction_history` /
   feedback for subsequent planner steps only.
 

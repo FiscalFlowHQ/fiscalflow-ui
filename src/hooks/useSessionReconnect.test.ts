@@ -113,10 +113,13 @@ describe("useSessionReconnect", () => {
     expect(events).toEqual(["step", "interrupt"]);
   });
 
-  it("surfaces 404 when continue is missing on the API", async () => {
+  it("surfaces 404 when continue has no run state", async () => {
     server.use(
       http.post("/sessions/t-cont/continue", () =>
-        HttpResponse.json({ detail: "Not Found" }, { status: 404 })
+        HttpResponse.json(
+          { detail: "Unknown thread — nothing to continue." },
+          { status: 404 }
+        )
       )
     );
 
@@ -132,7 +135,7 @@ describe("useSessionReconnect", () => {
       outcome = await result.current.continueFromCheckpoint();
     });
     expect(outcome.ok).toBe(false);
-    expect(outcome.error).toMatch(/unavailable|Not Found/i);
+    expect(outcome.error).toMatch(/Unknown thread|nothing to continue/i);
   });
 });
 

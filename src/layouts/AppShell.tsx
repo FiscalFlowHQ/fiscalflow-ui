@@ -1,7 +1,13 @@
-import { Link, Outlet } from "react-router-dom";
+import { Link, Outlet, useLocation } from "react-router-dom";
 import { ToastProvider } from "../components/feedback/Toast";
 
 export default function AppShell() {
+  const location = useLocation();
+  const settingsTo =
+    location.pathname.startsWith("/run/")
+      ? `/settings?return=${encodeURIComponent(location.pathname + location.search)}`
+      : "/settings";
+
   return (
     <ToastProvider>
       <div className="shell">
@@ -10,7 +16,7 @@ export default function AppShell() {
             Fiscal<span>Flow</span>
           </Link>
           <nav className="shell-nav">
-            <Link to="/settings" className="shell-nav-link">
+            <Link to={settingsTo} className="shell-nav-link">
               Settings
             </Link>
           </nav>

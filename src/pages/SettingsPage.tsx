@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   getProviderSettings,
   probeHealth,
@@ -44,6 +44,14 @@ function maskToken(token: string): string {
 }
 
 export default function SettingsPage() {
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const returnTo = searchParams.get("return");
+  const backTarget =
+    returnTo && returnTo.startsWith("/") && !returnTo.startsWith("//")
+      ? returnTo
+      : null;
+
   const stored = loadSettings();
   const [apiBaseUrl, setApiBaseUrl] = useState(stored.apiBaseUrl);
   const [apiToken, setApiToken] = useState(stored.apiToken);
@@ -189,7 +197,21 @@ export default function SettingsPage() {
   return (
     <div className="settings-page">
       <header className="settings-page__header">
-        <p className="settings-page__eyebrow">
+        <p className="settings-page__eyebrow settings-page__eyebrow-nav">
+          {backTarget ? (
+            <Link to={backTarget}>← Back to run</Link>
+          ) : (
+            <button
+              type="button"
+              className="settings-back-btn"
+              onClick={() => navigate(-1)}
+            >
+              ← Back
+            </button>
+          )}
+          <span className="settings-page__eyebrow-sep" aria-hidden>
+            ·
+          </span>
           <Link to="/">Home</Link>
         </p>
         <h1>Settings</h1>

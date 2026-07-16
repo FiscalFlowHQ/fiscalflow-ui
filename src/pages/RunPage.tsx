@@ -122,16 +122,49 @@ export default function RunPage() {
 
       <div className={layoutClass}>
         <PipelineRail state={run.pipeline.state} />
-        <ArtifactPanel artifacts={run.artifacts} />
+
+          <ChatPanel
+          className="chat-panel--main"
+          entries={run.transcript.entries}
+          hitl={run.hitl}
+          activityStatus={
+            run.continuing
+              ? "Continuing from checkpoint…"
+              : run.hitl.resuming
+                ? "Submitting decision…"
+                : run.phase === "streaming"
+                  ? "Generation running…"
+                  : run.phase === "server_running"
+                    ? "Run in progress on server…"
+                    : null
+          }
+          onResume={(request, envelope) => run.resumeRun(request, envelope)}
+          onSendInstruction={run.sendInstruction}
+          sendingInstruction={run.sendingInstruction}
+          instructionError={run.instructionError}
+          onClearInstructionError={run.clearInstructionError}
+          onExport={() => {
+            void run.exportTranscript();
+          }}
+        />
 
         <div className="run-page__col run-workspace__sidebar">
-          <DatabookPanel
-            key={threadId}
-            threadId={threadId}
-            initialDocumentRef={run.documentRef}
-            onDocumentRef={run.setDocumentRef}
-            onReadyChange={(ready, ref) => run.setDatabookReady(ready, ref)}
-          />
+          {run.hydrated ? (
+            <DatabookPanel
+              key={threadId}
+              threadId={threadId}
+              initialDocumentRef={run.documentRef}
+              onDocumentRef={run.setDocumentRef}
+              onReadyChange={(ready, ref) => run.setDatabookReady(ready, ref)}
+            />
+          ) : (
+            <section className="databook-panel" aria-busy="true">
+              <header className="databook-panel__head">
+                <h2 className="databook-panel__title">Databook</h2>
+              </header>
+              <p className="databook-dropzone__hint">Restoring session…</p>
+            </section>
+          )}
           <RunComposer
             databookReady={run.databookReady}
             documentRef={run.documentRef}
@@ -143,18 +176,7 @@ export default function RunPage() {
             }}
             onClearStartError={run.clearStartError}
           />
-          <ChatPanel
-            entries={run.transcript.entries}
-            hitl={run.hitl}
-            onResume={(request, envelope) => run.resumeRun(request, envelope)}
-            onSendInstruction={run.sendInstruction}
-            sendingInstruction={run.sendingInstruction}
-            instructionError={run.instructionError}
-            onClearInstructionError={run.clearInstructionError}
-            onExport={() => {
-              void run.exportTranscript();
-            }}
-          />
+          <ArtifactPanel artifacts={run.artifacts} />
         </div>
       </div>
     </div>

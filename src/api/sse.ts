@@ -234,6 +234,7 @@ export async function streamGeneration(
     signal,
   });
   await ensureOk(res);
+  handlers.onOpen?.();
 
   if (!res.body) {
     handlers.onClose?.();
@@ -256,15 +257,22 @@ export async function streamGeneration(
   });
 
   try {
-    while (!stop) {
+    while (true) {
       const { done, value } = await reader.read();
       if (done) {
-        parser.push(decoder.decode());
-        parser.flush();
+        if (!stop) {
+          parser.push(decoder.decode());
+          parser.flush();
+        }
         break;
       }
+      if (stop) {
+        // Keep draining until the server closes. Aborting the body on interrupt
+        // cancels the BE producer before the pause is checkpointed — Continue then
+        // looks like a no-op (flicker back to needs_continue with no card).
+        continue;
+      }
       parser.push(decoder.decode(value, { stream: true }));
-      if (stop) break;
     }
   } finally {
     try {

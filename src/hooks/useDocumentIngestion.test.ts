@@ -77,6 +77,7 @@ describe("useDocumentIngestion", () => {
           status: "failed",
           audit_status: "failed",
           error: "critical formula error",
+          audit_id: "doc-bad",
         })
       )
     );
@@ -97,8 +98,43 @@ describe("useDocumentIngestion", () => {
     await waitFor(() => {
       expect(result.current.phase).toBe("failed");
       expect(result.current.error).toBe("critical formula error");
+      expect(result.current.auditId).toBe("doc-bad");
     });
     expect(onFailed).toHaveBeenCalled();
+  });
+
+  it("picks up a late initialDocumentRef and re-polls to ready", async () => {
+    server.use(
+      http.get("/documents/doc-restored/status", () =>
+        HttpResponse.json({
+          status: "ready",
+          audit_status: "passed",
+          progress_pct: 100,
+        })
+      )
+    );
+
+    const onReady = vi.fn();
+    const { result, rerender } = renderHook(
+      (props: { initialDocumentRef: string | null }) =>
+        useDocumentIngestion({
+          threadId: "t-1",
+          initialDocumentRef: props.initialDocumentRef,
+          onReady,
+          pollIntervalMs: 20,
+        }),
+      { initialProps: { initialDocumentRef: null as string | null } }
+    );
+
+    expect(result.current.documentRef).toBeNull();
+
+    rerender({ initialDocumentRef: "doc-restored" });
+
+    await waitFor(() => {
+      expect(result.current.documentRef).toBe("doc-restored");
+      expect(result.current.ready).toBe(true);
+    });
+    expect(onReady).toHaveBeenCalledWith("doc-restored");
   });
 
   it("maps upload 413 to failed phase", async () => {

@@ -154,3 +154,20 @@ export function parseEditedContent(
 export function canAct(envelope: InterruptEnvelope, action: ResumeAction): boolean {
   return envelope.allowed_actions.includes(action);
 }
+
+/**
+ * Plan-type HITL gates that Auto-approve may skip:
+ * step plans (`phase: plan`), global plan, and section plan (not section output review).
+ */
+export function isPlanGate(envelope: InterruptEnvelope): boolean {
+  if (envelope.phase === "plan") return true;
+  if (envelope.tier === "global") return true;
+  if (
+    envelope.tier === "section" &&
+    envelope.step_id == null &&
+    !("completed_sections" in envelope.content)
+  ) {
+    return true;
+  }
+  return false;
+}

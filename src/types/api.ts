@@ -48,6 +48,18 @@ export interface DocumentStatusResponse {
   status: DocumentStatus | string;
   audit_status?: string | null;
   error?: string | null;
+  /** Present when audit failed and a review report is available (`/review/:auditId`). */
+  audit_id?: string | null;
+  progress_pct?: number | null;
+  progress_message?: string | null;
+  eta_seconds?: number | null;
+  ingest_started_at?: string | null;
+}
+
+export interface DocumentSkipAuditResponse {
+  document_ref: string;
+  status: string;
+  audit_status: string;
 }
 
 export interface StartGenerationRequest {
@@ -57,6 +69,17 @@ export interface StartGenerationRequest {
   /** UI default for composer: `"balanced"`. BE default if omitted is `"thorough"`. */
   approval_policy?: ApprovalPolicyName | string;
   provider_override?: string | null;
+  /** Skip plan gates (global/section/step plans); reviews still pause. */
+  auto_approve_plans?: boolean;
+}
+
+export interface HitlSettingsRequest {
+  auto_approve_plans: boolean;
+}
+
+export interface HitlSettingsResponse {
+  auto_approve_plans: boolean;
+  approval_policy: Record<string, unknown>;
 }
 
 export interface ResumeRequest {
@@ -149,8 +172,8 @@ export interface ReportMetadata {
 }
 
 /**
- * In-progress section subgraph snapshot when remediated BE surfaces it on `/state`.
- * Live BE (sessions.py) currently omits this — treat as null and rebuild Live from draft.
+ * In-progress section subgraph snapshot from `GET /state` → `section_state`
+ * (BE `sessions._live_section_state`). Null between sections / when idle.
  */
 export interface SectionState {
   section_id?: string | null;
