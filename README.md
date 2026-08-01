@@ -24,6 +24,28 @@ and a databook fails ExcelAuditor: use **Review errors** → `/review/:auditId`.
 By default (`FISCALFLOW_SKIP_AUDIT=true`, same as `run_pilot.py --skip-audit`) upload
 goes straight to extract & index using your LLM/embedding env settings.
 
+## Screenshots
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="FiscalFlow home" width="820" />
+</p>
+<p align="center"><em>Home — start a new FDD run</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/workspace.png" alt="FiscalFlow run workspace" width="820" />
+</p>
+<p align="center"><em>Workspace — pipeline, chat, databook upload, and composer</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/settings.png" alt="FiscalFlow settings" width="820" />
+</p>
+<p align="center"><em>Settings — API connection and LLM providers</em></p>
+
+<p align="center">
+  <img src="docs/screenshots/audit-review.png" alt="FiscalFlow Excel Auditor review" width="820" />
+</p>
+<p align="center"><em>Excel Auditor — review and fix spreadsheet errors</em></p>
+
 ## Stack
 
 | Layer | Technology |
