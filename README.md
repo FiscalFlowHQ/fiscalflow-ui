@@ -26,6 +26,12 @@ goes straight to extract & index using your LLM/embedding env settings.
 
 ## Screenshots
 
+Walkthrough (autoplay-friendly H.264):
+
+[![FiscalFlow demo](docs/screenshots/home.png)](docs/screenshots/demo.mp4)
+
+<p align="center"><em><a href="docs/screenshots/demo.mp4">Watch the desktop demo (MP4)</a></em></p>
+
 <p align="center">
   <img src="docs/screenshots/home.png" alt="FiscalFlow home" width="820" />
 </p>
